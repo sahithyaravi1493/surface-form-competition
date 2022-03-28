@@ -431,7 +431,122 @@ def inference_autobatch( model, encoder, example, batch = 1, prelog = False, cac
 
         
         
+def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog = False, cache = None):
+    '''
+    
+    if prelog is true, then we're just logging calculations to do in one big batch calculate
+    (used for caching)
+    
+    
+    '''
+    
+    ## if we are just prelogging cross entropy calculations to do later,
+    ## we will set caclulate=False for cross_entropy_list and it will output
+    ## a dummy value for now and just log calculations to do. Then the output
+    ## of inference_autobatch will not be correct, calling it in this case is 
+    ## just to log calculations to do in big batches
+    if prelog and (cache is not None):
+        calculate = False 
+    else:
+        calculate = True
+    
+    
+    #####
+    ## input data handling
+    #####
+    # i.e. if we're using GPT-3 through the OpenAI API
+    if type(model) == str:
+        max_len = 2048  
+        gpt3 = True
+    else:
+        max_len = 1024
+        gpt3 = False
 
+    options = []
+    for opt_raw in example['options']:
+        if gpt3:
+            options.append(opt_raw)
+        else:
+            # first, encode the option 
+            opt = { key: encoder.encode(opt_raw[key]) for key in opt_raw.keys() }
+
+            ## trim the option to the max length for gpt2
+            opt['premise'] = opt['premise'][-(max_len - len(opt['hypothesis'])):]
+            assert(len(opt['premise'] + opt['hypothesis']) <= max_len)
+
+            # then add the encoded, trimmed option
+            options.append( opt )
+
+    #####
+    ## cross-entropy calculation
+    #####
+    if gpt3:
+        ## get conditional CEs
+        cond_ce, cond_t_lens, _ = cross_entropy_list_gpt3([opt['premise'] for opt in options], 
+                                                          [opt['hypothesis'] for opt in options],
+                                                          model,
+                                                        cache=cache,calculate = calculate, batch=batch)
+        
+        ## get domain conditional CEs
+        domain_cond_ce, domain_cond_t_lens, _ = cross_entropy_list_gpt3([opt['uncond_premise'] for opt in options],
+                                        [opt['uncond_hypothesis'] for opt in options],
+                                        model,
+                                        cache=cache,calculate = calculate, batch=batch)
+
+        ## get unconditional CEs
+        uncond_ce, uncond_t_lens, _ = cross_entropy_list_gpt3([':' for opt in options],
+                                        [opt['uncond_hypothesis'] for opt in options],
+                                        model,
+                                        cache=cache,calculate = calculate, batch=batch)
+    else:
+        ## get conditional CEs
+        cond_ce, wt = cross_entropy_list([opt['premise'] for opt in options], 
+                                    [opt['hypothesis'] for opt in options],
+                                    model, cache=cache, batch=batch, calculate = calculate)
+
+        
+        ## get domain conditional CEs
+        domain_cond_ce, _ = cross_entropy_list([opt['uncond_premise'] for opt in options],
+                                        [opt['uncond_hypothesis'] for opt in options],
+                                        model, cache=cache, batch=batch, calculate = calculate)
+        
+        ## get unconditional CEs
+        uncond_ce , _ = cross_entropy_list([[25] for opt in options],
+                                       [opt['uncond_hypothesis'] for opt in options],
+                                       model, cache=cache, batch=batch, calculate = calculate)
+
+    ## get average CE by token
+    if gpt3:
+        avg_cond_ce = [ce/l for ce, l in zip(cond_ce, cond_t_lens)]
+    else:
+        
+        avg_cond_ce = [ce / len(opt['hypothesis']) for ce, opt in zip(cond_ce, options)]
+       
+    
+    #####
+    ## prediction
+    #####
+    # calculate dcpmi
+    dcpmi = [ce_0 - ce_1 for ce_0,ce_1 in zip(domain_cond_ce, cond_ce)]
+    pmi = [ce_0 - ce_1 for ce_0,ce_1 in zip(uncond_ce, cond_ce)]
+
+    
+    ## make predictions based on different scores
+    lm_pred = cond_ce.index(min(cond_ce))
+    lm_pred_wt = wt.index(min(wt))
+    lm_avg_pred = avg_cond_ce.index(min(avg_cond_ce))
+    lm_domain_cond_pred = domain_cond_ce.index(min(domain_cond_ce))
+    dcpmi_pred = dcpmi.index(max(dcpmi))
+    pmi_pred = pmi.index(max(pmi))
+    pred = {
+                 'lm': lm_pred,
+                 'lm_wt': lm_pred_wt,
+                 'tok_mean': lm_avg_pred,
+                 'dcpmi' : dcpmi_pred,
+                 'pmi': pmi_pred,
+                 'domain_cond': lm_domain_cond_pred,
+           }
+    return pred
 
 
 def fwd(model, encoder, examples, batch, cache = None):
