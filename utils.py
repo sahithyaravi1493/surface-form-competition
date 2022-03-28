@@ -4,7 +4,7 @@ from tqdm import tqdm
 import json
 import math
 import sys
-import openai
+# import openai
 import time
 import os
 import re
@@ -212,11 +212,11 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
         # log calculations we have not done yet
         for source,target in zip(sources, targets):
             if get_key(source, target) not in cache:
-                cache[get_key(source, target)] = {'source': source, 'target':target,'result':None}
+                cache[get_key(source, target)] = {'source': source, 'target':target,'result':None, 'worst_tkn': None}
         
         # if not calculating, return dummy values
         if not calculate:
-            return [1.]*len(sources)
+            return [1.]*len(sources), [1.]*len(sources)
         
         # if caching and calculating, we calculate for all examples
         # that have been cached but not calculated
@@ -227,13 +227,16 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
             sources_todo = list(zip(*cache_todo))[0]
             targets_todo = list(zip(*cache_todo))[1]
             
-            cache_results = cross_entropy_list(sources_todo, targets_todo, model, cache=None, batch=batch)
-            for source, target, result in zip(sources_todo,targets_todo, cache_results):
+            cache_results, worst_tkn_results = cross_entropy_list(sources_todo, targets_todo, model, cache=None, batch=batch)
+            for source, target, result, w in zip(sources_todo,targets_todo, cache_results, worst_tkn_results):
                 cache[get_key(source, target)]['result'] = result
+                cache[get_key(source, target)]['worst_tkn'] = w
+
     
         ## return results for thie example
         results = [cache[get_key(source, target)]['result'] for source,target in zip(sources, targets)]
-        return results
+        results_worst_tkn = [cache[get_key(source, target)]['worst_tkn'] for source,target in zip(sources, targets)]
+        return results, results_worst_tkn
     ###############################        
         
         
@@ -251,15 +254,18 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     # if batching, break it up into smaller pieces
     if batch:
         ce_list = []
+        wt_list = []
         
         n_batches = math.ceil(len(sources) / batch)
         
         list_fun = (lambda v: tqdm(list(v))) if cache is not None else list
         
         for i in tqdm(list(range(n_batches))):
-            ce_list += cross_entropy_list(sources[i*batch:(i+1)*batch], targets[i*batch:(i+1)*batch], model, batch=False)
+            x, y = cross_entropy_list(sources[i*batch:(i+1)*batch], targets[i*batch:(i+1)*batch], model, batch=False)
+            ce_list += x
+            wt_list += y
             #sources, targets = sources[batch:], targets[batch:]
-        return ce_list 
+        return ce_list, wt_list
 
     # initialize input tensors
     max_len = max([len(s + t) for s,t in zip(sources, targets)])
@@ -284,8 +290,13 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     # get cross-entropies given the logits
     logit_shape = logits.shape
     logits = logits.view(-1, logit_shape[-1])
-    ce_list = F.cross_entropy(logits, labels[:,1:].contiguous().view(-1), reduction='none')
-    ce_list = ce_list.view(n_seqs, max_len -1).sum(dim=1).squeeze().tolist()
+    ce_list_orig = F.cross_entropy(logits, labels[:,1:].contiguous().view(-1), reduction='none') # log softmax + NLL
+    
+    ce_list_orig = ce_list_orig.view(n_seqs, max_len -1)
+    ce_mins, _ = torch.max(ce_list_orig, dim=1, keepdim=True) # take the token with max loss
+    ce_mins = ce_mins.squeeze().tolist()
+    ce_list = ce_list_orig.sum(dim=1).squeeze().tolist()
+
     
     # if one element (i.e. len(sources) == 1), nest it into a list. Otherwise, give full list
     # this just handles an idiosyncracy of the .tolist() function
@@ -293,8 +304,9 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
         len(ce_list)
     except:
         ce_list = [ce_list]
+        ce_mins = [ce_mins]
     
-    return ce_list
+    return ce_list, ce_mins
 
 
 
@@ -369,18 +381,18 @@ def inference_autobatch( model, encoder, example, batch = 1, prelog = False, cac
                                         cache=cache,calculate = calculate, batch=batch)
     else:
         ## get conditional CEs
-        cond_ce = cross_entropy_list([opt['premise'] for opt in options], 
+        cond_ce, wt = cross_entropy_list([opt['premise'] for opt in options], 
                                     [opt['hypothesis'] for opt in options],
                                     model, cache=cache, batch=batch, calculate = calculate)
 
         
         ## get domain conditional CEs
-        domain_cond_ce  = cross_entropy_list([opt['uncond_premise'] for opt in options],
+        domain_cond_ce, _ = cross_entropy_list([opt['uncond_premise'] for opt in options],
                                         [opt['uncond_hypothesis'] for opt in options],
                                         model, cache=cache, batch=batch, calculate = calculate)
         
         ## get unconditional CEs
-        uncond_ce = cross_entropy_list([[25] for opt in options],
+        uncond_ce , _ = cross_entropy_list([[25] for opt in options],
                                        [opt['uncond_hypothesis'] for opt in options],
                                        model, cache=cache, batch=batch, calculate = calculate)
 
@@ -402,12 +414,14 @@ def inference_autobatch( model, encoder, example, batch = 1, prelog = False, cac
     
     ## make predictions based on different scores
     lm_pred = cond_ce.index(min(cond_ce))
+    lm_pred_wt = wt.index(min(wt))
     lm_avg_pred = avg_cond_ce.index(min(avg_cond_ce))
     lm_domain_cond_pred = domain_cond_ce.index(min(domain_cond_ce))
     dcpmi_pred = dcpmi.index(max(dcpmi))
     pmi_pred = pmi.index(max(pmi))
     pred = {
                  'lm': lm_pred,
+                 'lm_wt': lm_pred_wt,
                  'tok_mean': lm_avg_pred,
                  'dcpmi' : dcpmi_pred,
                  'pmi': pmi_pred,
