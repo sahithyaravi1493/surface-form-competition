@@ -8,7 +8,7 @@ import sys
 import time
 import os
 import re
-
+from abstract_examples import construct_abstractions
 
 def detokenizer(string):
     # ari custom
@@ -467,8 +467,14 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         if gpt3:
             options.append(opt_raw)
         else:
+            abstracted_hypothesis = construct_abstractions(opt_raw['hypothesis'])
+
             # first, encode the option 
             opt = { key: encoder.encode(opt_raw[key]) for key in opt_raw.keys() }
+
+            # k = 5 abstractions
+            for a in abstracted_hypothesis:
+                opt['abstracted'] = [encoder.encode(a) for a in abstracted_hypothesis]
 
             ## trim the option to the max length for gpt2
             opt['premise'] = opt['premise'][-(max_len - len(opt['hypothesis'])):]
@@ -504,6 +510,22 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                                     [opt['hypothesis'] for opt in options],
                                     model, cache=cache, batch=batch, calculate = calculate)
 
+        ## get conditional CEs for all abstractions
+        all_ces = [cond_ce]
+        all_wts = [wt]
+        for i in range(5):
+            abs_cond_ce, abs_wt = cross_entropy_list([opt['premise'] for opt in options], 
+                                        [opt['abstracted'][i] for opt in options],
+                                        model, cache=cache, batch=batch, calculate = calculate)
+            all_ces.append(abs_cond_ce)
+            all_wts.append(abs_wt)
+
+
+        abstrated_ce = [min([item[i] for item in all_ces]) for i in range(len(options))]
+        abstrated_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
+
+
+
         
         ## get domain conditional CEs
         domain_cond_ce, _ = cross_entropy_list([opt['uncond_premise'] for opt in options],
@@ -534,6 +556,8 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
     ## make predictions based on different scores
     lm_pred = cond_ce.index(min(cond_ce))
     lm_pred_wt = wt.index(min(wt))
+    lm_abs = abstrated_ce.index(min(abstrated_ce))
+    lm_abs_wt = abstrated_wt_ce.index(min(abstrated_wt_ce))
     lm_avg_pred = avg_cond_ce.index(min(avg_cond_ce))
     lm_domain_cond_pred = domain_cond_ce.index(min(domain_cond_ce))
     dcpmi_pred = dcpmi.index(max(dcpmi))
@@ -541,6 +565,8 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
     pred = {
                  'lm': lm_pred,
                  'lm_wt': lm_pred_wt,
+                 'lm_abs': lm_abs,
+                 'lm_abs_wt': lm_abs_wt,
                  'tok_mean': lm_avg_pred,
                  'dcpmi' : dcpmi_pred,
                  'pmi': pmi_pred,
@@ -600,13 +626,13 @@ def fwd(model, encoder, examples, batch, cache = None):
     if cache is not None:
         print('logging examples')
         for example in tqdm( examples):
-            _ = inference_autobatch(model, encoder, example, prelog=True, cache = cache, batch=batch )
+            _ = inference_autobatch_abstracted(model, encoder, example, prelog=True, cache = cache, batch=batch )
 
     ## in this loop, we actually do the calculations from above in efficient batches, storing results 
     ## in the cache and calculating actual predictions
     print('actually calculating')
     for example in tqdm(examples):
-        pred = inference_autobatch(model, encoder, example, prelog=False, cache = cache, batch=batch )
+        pred = inference_autobatch_abstracted(model, encoder, example, prelog=False, cache = cache, batch=batch )
         predictions_list.append(pred)
 
         

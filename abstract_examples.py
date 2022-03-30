@@ -73,7 +73,7 @@ def get_hypernyms(sense, tag=wn.NOUN, K=3):
         for lemma in synset.lemmas()[:1]:
             yield lemma.name()
 
-def disambiguate(sentence, word, method = "frequency"):
+def disambiguate(sentence, word, method="frequency"):
     # uses most frequent sense or lesk
     sense = None
     if method=="bert":
@@ -131,7 +131,7 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, extract_method="pos", abstract_method="hypernyms"):
+def construct_abstractions(sentence, extract_method="pos", abstract_method="both"):
     doc = nlp(sentence)
     if extract_method == "svo":
         subject, verb, attribute, all_words = extract_svo(doc)
@@ -143,14 +143,14 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="hype
     abs_sentences = []
     # print(all_words)
     for word in all_words:
-        if abstract_method == "synsets":
-            unique = set(synonym for synonym in get_synonyms(word) if synonym != word)
-            abstraction_map[word] = list(unique)[:5]
-        elif abstract_method == "hypernyms":
+        if abstract_method == "hypernyms" or abstract_method== "both":
             sense = disambiguate(sentence, word)
             if sense is not None:
                 unique = set(h for h in get_hypernyms(sense) if h != word)
                 abstraction_map[word] = unique
+        elif abstract_method == "synsets":
+            unique = set(synonym for synonym in get_synonyms(word) if synonym != word)
+            abstraction_map[word] = list(unique)[:5]
         elif abstract_method == "similar_tos":
             unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
             abstraction_map[word] = list(unique)[:5]
@@ -158,9 +158,9 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="hype
             
     for word in abstraction_map:
         for syn in abstraction_map[word]:
-            out = sentence
-            abs_sentences.append(out.replace(word, syn))
-
+            out = sentence.replace(word, syn).replace("_", " ")
+            abs_sentences.append(out)
+    abs_sentences.extend(["None"]*5)
     return abs_sentences
         
 
@@ -182,7 +182,7 @@ def all_sentence_abstractions(text):
 if __name__ == "__main__":
     print(" Generate Abstractions for a sample input based on synonyms from wordnet")
     sent = "A cat and its furry companions on a couch."
-    abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="hypernyms")
+    abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="both")
     print(abstractions)
 
 
