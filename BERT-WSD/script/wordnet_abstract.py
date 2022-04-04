@@ -3,21 +3,22 @@ import re
 
 import pandas as pd
 from tqdm import tqdm
-import random
+
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.wsd import lesk
+# from pywsd.lesk import simple_lesk
+# cuda devices
+import os
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"  # specify which GPU(s) to be used
 
-import sys, os
-sys.path.append('/ubc/cs/research/nlp/sahiravi/surface-form-competition/BERT-WSD/script')
-random.seed(50)
-
-#Comment these 3 lines out if we are not using BERT WSD
-from demo_model import load_model, get_predictions
+# Comment these 3 lines out if we are not using BERT WSD
+from demo_model import get_predictions, load_model
 model_dir = "/ubc/cs/research/nlp/sahiravi/BERT-WSD/bert_base-augmented-batch_size=128-lr=2e-5-max_gloss=6"
 model, tokenizer = load_model(model_dir)
 
-#nltk downloads
+# nltk downloads
 
 nlp = spacy.load("en_core_web_md")
 dir = '/ubc/cs/research/nlp/sahiravi/datasets/caches'
@@ -30,7 +31,7 @@ stopwords = nltk.corpus.stopwords.words('english')
 # object and subject constants
 OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
-POS_ALLOWED = {"NOUN", "VERB","ADJ"}
+POS_ALLOWED = {"NOUN"} #{"VERB", "NOUN", "ADJ"}
 
 
 def load_text(path):
@@ -77,8 +78,7 @@ def get_hypernyms(sense, tag=wn.NOUN, K=3):
         for lemma in synset.lemmas()[:1]:
             yield lemma.name()
 
-def disambiguate(sentence, word, method="bert"):
-    # uses most frequent sense or lesk
+def disambiguate(sentence, word, method = "bert"):
     sense = None
     if method=="bert":
         sense = get_bert_predictions(sentence, word)
@@ -146,14 +146,14 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="hype
     abs_sentences = []
     # print(all_words)
     for word in all_words:
-        if abstract_method == "hypernyms":
+        if abstract_method == "synsets":
+            unique = set(synonym for synonym in get_synonyms(word) if synonym != word)
+            abstraction_map[word] = list(unique)[:5]
+        elif abstract_method == "hypernyms":
             sense = disambiguate(sentence, word)
             if sense is not None:
                 unique = set(h for h in get_hypernyms(sense) if h != word)
                 abstraction_map[word] = unique
-        elif abstract_method == "synsets":
-            unique = set(synonym for synonym in get_synonyms(word) if synonym != word)
-            abstraction_map[word] = list(unique)[:5]
         elif abstract_method == "similar_tos":
             unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
             abstraction_map[word] = list(unique)[:5]
@@ -161,10 +161,9 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="hype
             
     for word in abstraction_map:
         for syn in abstraction_map[word]:
-            out = sentence.replace(word, syn).replace("_", " ")
-            abs_sentences.append(out)
-    random.shuffle(abs_sentences)
-    abs_sentences.extend(["None"]*5)
+            out = sentence
+            abs_sentences.append(out.replace(word, syn))
+
     return abs_sentences
         
 
@@ -181,13 +180,10 @@ def all_sentence_abstractions(text):
     df["abstractions"] = abstracted_sentences
     return df
 
-
 # gather the user input and gather the info
 if __name__ == "__main__":
     print(" Generate Abstractions for a sample input based on synonyms from wordnet")
-    sent = "A dog and its companions sitting on a couch."
+    sent = "A cat and its furry companions on a couch."
     abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="hypernyms")
     print(abstractions)
-
-
 

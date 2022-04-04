@@ -285,7 +285,9 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     # get logits from the model
     with torch.no_grad():
         input_ids = input_ids.to(device)
-        logits = model(input_ids).logits.cpu()[:,:-1].contiguous()
+        logits = model(input_ids, return_dict=True)
+        #print(logits)
+        logits = logits.logits.cpu()[:,:-1].contiguous()
     
     # get cross-entropies given the logits
     logit_shape = logits.shape
