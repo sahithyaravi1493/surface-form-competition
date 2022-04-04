@@ -463,16 +463,18 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         gpt3 = False
 
     options = []
+    K = 5
     for opt_raw in example['options']:
         if gpt3:
             options.append(opt_raw)
         else:
-            abstracted_hypothesis = construct_abstractions(opt_raw['hypothesis'])
+            abstracted_hypothesis = construct_abstractions(opt_raw['hypothesis'])[:K]
+            print(opt_raw['hypothesis'], abstracted_hypothesis[:K])
 
             # first, encode the option 
             opt = { key: encoder.encode(opt_raw[key]) for key in opt_raw.keys() }
 
-            # k = 5 abstractions
+           
             for a in abstracted_hypothesis:
                 opt['abstracted'] = [encoder.encode(a) for a in abstracted_hypothesis]
 
@@ -513,7 +515,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         ## get conditional CEs for all abstractions
         all_ces = [cond_ce]
         all_wts = [wt]
-        for i in range(5):
+        for i in range(K):
             abs_cond_ce, abs_wt = cross_entropy_list([opt['premise'] for opt in options], 
                                         [opt['abstracted'][i] for opt in options],
                                         model, cache=cache, batch=batch, calculate = calculate)

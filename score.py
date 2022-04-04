@@ -129,7 +129,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-shot', type=int, default=0)
     parser.add_argument('--variant', type=int, default=None)
     parser.add_argument('--split', type=str, default='dev')
-    parser.add_argument('--batch', type=int, default=10)
+    parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--sample', type=int, default=None)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--key', type=str, default='api.key')
@@ -159,8 +159,9 @@ if __name__ == '__main__':
     accs = score(model, args.model, encoder, examples, stem, args.split, args.batch)
 
     # print results
+    print("#####################################################")
     print(f'{name} gets {accs}% on {args.dataset}')
-    print('domain_cond lm lm_wt tok_mean pmi dcpmi')
-    print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
-    print(f"{accs['domain_cond']}, {accs['lm']}, {accs['lm_wt']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
+    print('domain_cond lm lm_wt lm_abs lm_abs_wt tok_mean pmi dcpmi')
+    # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
+    print(f"{accs['domain_cond']}, {accs['lm']}, {accs['lm_wt']}, {accs['lm_abs']}, {accs['lm_abs_wt']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
 

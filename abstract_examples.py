@@ -3,11 +3,12 @@ import re
 
 import pandas as pd
 from tqdm import tqdm
-
+import random
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.wsd import lesk
 
+random.seed(50)
 # Comment these 3 lines out if we are not using BERT WSD
 # from demo_model import get_predictions, load_model
 # model_dir = "/ubc/cs/research/nlp/sahiravi/BERT-WSD/bert_base-augmented-batch_size=128-lr=2e-5-max_gloss=6"
@@ -26,7 +27,7 @@ stopwords = nltk.corpus.stopwords.words('english')
 # object and subject constants
 OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
-POS_ALLOWED = {"NOUN"} #{"VERB", "NOUN", "ADJ"}
+POS_ALLOWED = {"NOUN", "VERB","ADJ"}
 
 
 def load_text(path):
@@ -131,7 +132,7 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, extract_method="pos", abstract_method="both"):
+def construct_abstractions(sentence, extract_method="pos", abstract_method="hypernyms"):
     doc = nlp(sentence)
     if extract_method == "svo":
         subject, verb, attribute, all_words = extract_svo(doc)
@@ -143,7 +144,7 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="both
     abs_sentences = []
     # print(all_words)
     for word in all_words:
-        if abstract_method == "hypernyms" or abstract_method== "both":
+        if abstract_method == "hypernyms":
             sense = disambiguate(sentence, word)
             if sense is not None:
                 unique = set(h for h in get_hypernyms(sense) if h != word)
@@ -160,6 +161,7 @@ def construct_abstractions(sentence, extract_method="pos", abstract_method="both
         for syn in abstraction_map[word]:
             out = sentence.replace(word, syn).replace("_", " ")
             abs_sentences.append(out)
+    random.shuffle(abs_sentences)
     abs_sentences.extend(["None"]*5)
     return abs_sentences
         
@@ -181,8 +183,8 @@ def all_sentence_abstractions(text):
 # gather the user input and gather the info
 if __name__ == "__main__":
     print(" Generate Abstractions for a sample input based on synonyms from wordnet")
-    sent = "A cat and its furry companions on a couch."
-    abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="both")
+    sent = "A cat and its companions sitting on a couch."
+    abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="hypernyms")
     print(abstractions)
 
 
