@@ -6,7 +6,7 @@ import sys
 import os
 import logging
 import xml.etree.ElementTree as ET
-from utils import detokenizer
+from utils_s import detokenizer
 
 
 '''

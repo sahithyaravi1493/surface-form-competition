@@ -471,7 +471,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
             options.append(opt_raw)
         else:
             abstracted_hypothesis = construct_abstractions(opt_raw['hypothesis'])[:K]
-            print(opt_raw['hypothesis'], abstracted_hypothesis[:K])
+            # print(opt_raw['hypothesis'], abstracted_hypothesis[:K])
 
             # first, encode the option 
             opt = { key: encoder.encode(opt_raw[key]) for key in opt_raw.keys() }

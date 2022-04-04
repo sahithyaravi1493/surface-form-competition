@@ -115,7 +115,7 @@ def get_examples(dataset_name, split, stem, n_shot, variant):
 
 if __name__ == '__main__':
     from transformers import GPT2LMHeadModel, GPT2Tokenizer
-    from utils import score
+    from utils_s import score
     import argparse
     import random
     import numpy as np
