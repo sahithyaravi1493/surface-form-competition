@@ -7,7 +7,6 @@ import random
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.wsd import lesk
-
 import sys, os
 sys.path.append('/ubc/cs/research/nlp/sahiravi/surface-form-competition/BERT-WSD/script')
 random.seed(50)
@@ -30,7 +29,7 @@ stopwords = nltk.corpus.stopwords.words('english')
 # object and subject constants
 OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
-POS_ALLOWED = {"NOUN", "VERB","ADJ"}
+
 
 
 def load_text(path):
@@ -38,7 +37,7 @@ def load_text(path):
         input = f.readlines()
     return input
 
-def get_valid_pos(t):
+def get_valid_pos(t, POS_ALLOWED = {"NOUN"}):
     return (len(t.text) > 2) and (t.lemma_ not in stopwords) and (t.pos_ in POS_ALLOWED)
 
 
@@ -55,10 +54,9 @@ def get_all_similar_tos(word, tag=wn.NOUN):
                 for lemma in sim.lemma_names():
                     yield (lemma, sim.name())
 
-def get_synonyms(word, tag=wn.NOUN):
-    for synset in wn.synsets(word, pos=tag):
-        for lemma in synset.lemmas():
-            yield lemma.name()
+def get_synonyms(synset, tag=wn.NOUN):
+    for lemma in synset.lemmas():
+        yield lemma.name()
 
 def get_hypernyms(sense, tag=wn.NOUN, K=3):
     # Consider only upto K levels up in shortest path
@@ -82,6 +80,8 @@ def disambiguate(sentence, word, method="bert"):
     sense = None
     if method=="bert":
         sense = get_bert_predictions(sentence, word)
+        if sense is None and wn.synsets(word):
+            sense = wn.synsets(word)[0]
     elif method == "lesk":
         sense = lesk(sentence, word, "n")
     elif method == "frequency":
@@ -102,13 +102,18 @@ def get_bert_predictions(sentence, word):
             out = wn.synsets(word)[0]
     return out
 
-def extract_pos_based(doc):
+def extract_pos_based(doc, POS_ALLOWED):
     out = []
     for token in doc:
-        if get_valid_pos(token):
+        if get_valid_pos(token, POS_ALLOWED):
             out.append(token.text)
     return out
 
+def get_chunks(doc):
+    noun_phrases = set()
+    for chunk in doc.noun_chunks:
+        noun_phrases.add(chunk.text) # chunk.root.text, chunk.root.dep_, chunk.root.head.text
+    return noun_phrases
 
 # wup_similarity
 # extract the subject, object and verb from the input
@@ -134,38 +139,61 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, extract_method="pos", abstract_method="hypernyms"):
+def construct_abstractions(sentence, extract_method="pos"):
     doc = nlp(sentence)
+    noun_phrases = get_chunks(doc)
     if extract_method == "svo":
         subject, verb, attribute, all_words = extract_svo(doc)
     elif extract_method == "pos":
-        all_words = extract_pos_based(doc)
+        all_words = extract_pos_based(doc,POS_ALLOWED={"NOUN"})
+        # all_words.extend(extract_pos_based(doc, POS_ALLOWED = {"ADJ"}))
 
 
-    abstraction_map = {}
-    abs_sentences = []
-    # print(all_words)
+    hypernym_map = {}
+    synonym_map = {}
+
+    hyp_sentences = []
+    syn_sentences = []
+    # for phrase in noun_phrases:
+    #     sense = disambiguate(sentence, phrase)
+    #     if sense is not None:
+    #         unique = set(h for h in get_hypernyms(sense) if h != phrase)
+    #         hypernym_map[phrase] = unique
+    #         unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != phrase)
+    #         synonym_map[phrase] = unique_syn
+    
+    # print(hypernym_map)
+    # print(synonym_map)
+
     for word in all_words:
-        if abstract_method == "hypernyms":
-            sense = disambiguate(sentence, word)
-            if sense is not None:
-                unique = set(h for h in get_hypernyms(sense) if h != word)
-                abstraction_map[word] = unique
-        elif abstract_method == "synsets":
-            unique = set(synonym for synonym in get_synonyms(word) if synonym != word)
-            abstraction_map[word] = list(unique)[:5]
-        elif abstract_method == "similar_tos":
-            unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
-            abstraction_map[word] = list(unique)[:5]
+        sense = disambiguate(sentence, word)
+        if sense is not None:
+            unique = set(h for h in get_hypernyms(sense) if h != word)
+            hypernym_map[word] = unique
+            unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
+            synonym_map[word] = unique_syn
+        # elif abstract_method == "similar_tos":
+        #     unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
+        #     abstraction_map[word] = list(unique)[:5]
         
             
-    for word in abstraction_map:
-        for syn in abstraction_map[word]:
+    for word in hypernym_map:
+        for syn in hypernym_map[word]:
             out = sentence.replace(word, syn).replace("_", " ")
-            abs_sentences.append(out)
-    random.shuffle(abs_sentences)
-    abs_sentences.extend(["None"]*5)
-    return abs_sentences
+            hyp_sentences.append(out)
+
+    for word in synonym_map:
+        for syn in synonym_map[word]:
+            out = sentence.replace(word, syn).replace("_", " ")
+            syn_sentences.append(out)
+    random.shuffle(hyp_sentences)
+    random.shuffle(syn_sentences)
+   
+    syn_sentences.extend([sentence]*5)
+    hyp_sentences.extend([sentence]*5)
+    # hyp_sentences.extend(["None"]*5)
+    # syn_sentences.extend(["None"]*5)
+    return hyp_sentences, syn_sentences
         
 
 def all_sentence_abstractions(text):
@@ -184,10 +212,12 @@ def all_sentence_abstractions(text):
 
 # gather the user input and gather the info
 if __name__ == "__main__":
-    print(" Generate Abstractions for a sample input based on synonyms from wordnet")
-    sent = "A dog and its companions sitting on a couch."
-    abstractions = construct_abstractions(sent, extract_method="pos", abstract_method="hypernyms")
-    print(abstractions)
+    print(" Generate Abstractions for a sample input based on hypernyms and synonyms from wordnet")
+    sent = "The President of the United States announced that he is resigning."  #A dog and its companions sitting on a couch.
+    # doc = nlp(sent)
+    # get_chunks(doc)
+    h, s = construct_abstractions(sent)
+    print(h, s)
 
 
 

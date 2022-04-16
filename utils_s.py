@@ -8,6 +8,7 @@ import sys
 import time
 import os
 import re
+from statistics import mean
 from abstract_examples import construct_abstractions
 
 def detokenizer(string):
@@ -295,7 +296,10 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     ce_list_orig = F.cross_entropy(logits, labels[:,1:].contiguous().view(-1), reduction='none') # log softmax + NLL
     
     ce_list_orig = ce_list_orig.view(n_seqs, max_len -1)
-    ce_mins, _ = torch.max(ce_list_orig, dim=1, keepdim=True) # take the token with max loss
+    ce_mins, _ = torch.topk(ce_list_orig,2) # take the 2 tokens with max loss
+    # print(ce_mins)
+    ce_mins = torch.sum(ce_mins, dim=1) # sum the losses of the tokens
+    # print("summed", ce_mins)
     ce_mins = ce_mins.squeeze().tolist()
     ce_list = ce_list_orig.sum(dim=1).squeeze().tolist()
 
@@ -470,15 +474,21 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         if gpt3:
             options.append(opt_raw)
         else:
-            abstracted_hypothesis = construct_abstractions(opt_raw['hypothesis'])[:K]
-            # print(opt_raw['hypothesis'], abstracted_hypothesis[:K])
+            hyp_abs, syn_abs = construct_abstractions(opt_raw['premise'])
+            hyp_abs = hyp_abs[:K]
+            syn_abs = syn_abs[:K]
+            
+           # print(opt_raw['premise'], hyp_abs, syn_abs)
 
             # first, encode the option 
             opt = { key: encoder.encode(opt_raw[key]) for key in opt_raw.keys() }
 
            
-            for a in abstracted_hypothesis:
-                opt['abstracted'] = [encoder.encode(a) for a in abstracted_hypothesis]
+            for a in hyp_abs:
+                opt['hypernym'] = [encoder.encode(a) for a in hyp_abs]
+            
+            for a in syn_abs:
+                opt['synonym'] = [encoder.encode(a) for a in syn_abs]
 
             ## trim the option to the max length for gpt2
             opt['premise'] = opt['premise'][-(max_len - len(opt['hypothesis'])):]
@@ -514,21 +524,37 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                                     [opt['hypothesis'] for opt in options],
                                     model, cache=cache, batch=batch, calculate = calculate)
 
-        ## get conditional CEs for all abstractions
+        ## get conditional CEs for all hypernyms
         all_ces = [cond_ce]
         all_wts = [wt]
         for i in range(K):
-            abs_cond_ce, abs_wt = cross_entropy_list([opt['premise'] for opt in options], 
-                                        [opt['abstracted'][i] for opt in options],
+            abs_cond_ce, abs_wt = cross_entropy_list( 
+                                        [opt['hypernym'][i] for opt in options], 
+                                        [opt['hypothesis'] for opt in options],
                                         model, cache=cache, batch=batch, calculate = calculate)
             all_ces.append(abs_cond_ce)
             all_wts.append(abs_wt)
 
 
         abstrated_ce = [min([item[i] for item in all_ces]) for i in range(len(options))]
+        abstracted_avg = [mean([item[i] for item in all_ces]) for i in range(len(options))]
         abstrated_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
 
+    ## get conditional CEs for all synonyms
+        all_syn_ces = [cond_ce]
+        all_syn_wts = [wt]
+        for i in range(K):
+            syn_cond_ce, syn_wt = cross_entropy_list( 
+                                        [opt['synonym'][i] for opt in options], 
+                                        [opt['hypothesis'] for opt in options],
+                                        model, cache=cache, batch=batch, calculate = calculate)
+            all_syn_ces.append(syn_cond_ce)
+            all_syn_wts.append(syn_wt)
 
+
+        syn_ce = [min([item[i] for item in all_syn_ces]) for i in range(len(options))]
+        syn_avg = [mean([item[i] for item in all_syn_ces]) for i in range(len(options))]
+        syn_wt_ce = [min([item[i] for item in all_syn_wts]) for i in range(len(options))]
 
         
         ## get domain conditional CEs
@@ -561,20 +587,28 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
     lm_pred = cond_ce.index(min(cond_ce))
     lm_pred_wt = wt.index(min(wt))
     lm_abs = abstrated_ce.index(min(abstrated_ce))
+    lm_abs_avg = abstracted_avg.index(min(abstracted_avg))
     lm_abs_wt = abstrated_wt_ce.index(min(abstrated_wt_ce))
+    lm_syn = syn_ce.index(min(syn_ce))
+    lm_syn_avg = syn_avg.index(min(syn_avg))
+    lm_syn_wt = syn_wt_ce.index(min(syn_wt_ce))
     lm_avg_pred = avg_cond_ce.index(min(avg_cond_ce))
     lm_domain_cond_pred = domain_cond_ce.index(min(domain_cond_ce))
     dcpmi_pred = dcpmi.index(max(dcpmi))
     pmi_pred = pmi.index(max(pmi))
     pred = {
-                 'lm': lm_pred,
-                 'lm_wt': lm_pred_wt,
-                 'lm_abs': lm_abs,
-                 'lm_abs_wt': lm_abs_wt,
-                 'tok_mean': lm_avg_pred,
-                 'dcpmi' : dcpmi_pred,
-                 'pmi': pmi_pred,
-                 'domain_cond': lm_domain_cond_pred,
+                 'lm': round(lm_pred, 3),
+                 'lm_wt': round(lm_pred_wt, 3),
+                 'lm_hyp': round(lm_abs, 3),
+                 'lm_hyp_avg': round(lm_abs_avg, 3),
+                 'lm_hyp_wt': round(lm_abs_wt, 3),
+                 'lm_syn': round(lm_syn, 3),
+                 'lm_syn_avg': round(lm_syn_avg, 3),
+                 'lm_syn_wt': round(lm_syn_wt, 3),
+                 'tok_mean': round(lm_avg_pred, 3),
+                 'dcpmi' : round(dcpmi_pred, 3),
+                 'pmi': round(pmi_pred, 3),
+                 'domain_cond': round(lm_domain_cond_pred, 3),
            }
     return pred
 

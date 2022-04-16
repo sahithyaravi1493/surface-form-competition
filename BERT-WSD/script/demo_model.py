@@ -18,7 +18,7 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"]="3"  # specify which GPU(s) to be used
 
 MAX_SEQ_LENGTH = 64
-DEVICE = 'cpu' #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def get_predictions(model, tokenizer, sentence):

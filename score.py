@@ -1,3 +1,7 @@
+import os
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"]="3"  # specify which GPU(s) to be used
+
 def get_model(model_name, key_file):
     if model_name.lower() in ['gpt2', 'gpt2-s', 'gpt2-small', 'gs', 's', 'small']:
         # GPT-2 Small
@@ -129,7 +133,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-shot', type=int, default=0)
     parser.add_argument('--variant', type=int, default=None)
     parser.add_argument('--split', type=str, default='dev')
-    parser.add_argument('--batch', type=int, default=32)
+    parser.add_argument('--batch', type=int, default=128)
     parser.add_argument('--sample', type=int, default=None)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--key', type=str, default='api.key')
@@ -161,7 +165,9 @@ if __name__ == '__main__':
     # print results
     print("#####################################################")
     print(f'{name} gets {accs}% on {args.dataset}')
-    print('domain_cond lm lm_wt lm_abs lm_abs_wt tok_mean pmi dcpmi')
+    for key, value in accs.items():
+        accs[key] = round(accs[key], 3)
+    print('lm lm_wt lm_hyp lm_hyp_wt lm_hyp_avg lm_syn lm_syn_wt lm_syn_avg token_mean pmi dcpmi')
     # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
-    print(f"{accs['domain_cond']}, {accs['lm']}, {accs['lm_wt']}, {accs['lm_abs']}, {accs['lm_abs_wt']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
+    print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_hyp']}, {accs['lm_hyp_wt']}, {accs['lm_hyp_avg']}, {accs['lm_syn']}, {accs['lm_syn_wt']}, {accs['lm_syn_avg']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
 
