@@ -30,7 +30,29 @@ stopwords = nltk.corpus.stopwords.words('english')
 OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
 
+entity_maps = {
+    'ORG' : 'organization', 
+    'DATE': 'date', 
+    'GPE': 'location', 
+    'PERSON': 'person', 
+    'MONEY':'money', 
+    'PRODUCT':'object', 
+    'TIME':'time', 
+    'WORK_OF_ART':'title', 
+    'QUANTITY':'quantity', 
+    'NORP':'group', 
+    'LOC':'location',
+    'EVENT':'event', 
+    'LAW':'law', 
+    'LANGUAGE':'language'
+    }
 
+def replace_named_entities(sentence, doc):
+    entity_abstracted_sentences = []
+    for ent in doc.ents:
+        if ent.label_ in entity_maps:
+            entity_abstracted_sentences.append(sentence.replace(ent.text, entity_maps[ent.label_]))
+    return entity_abstracted_sentences
 
 def load_text(path):
     with open(path) as f:
@@ -152,8 +174,8 @@ def construct_abstractions(sentence, extract_method="pos"):
     hypernym_map = {}
     synonym_map = {}
 
-    hyp_sentences = []
-    syn_sentences = []
+    hyp_sentences = [sentence]*5
+    syn_sentences = [sentence]*5
     # for phrase in noun_phrases:
     #     sense = disambiguate(sentence, phrase)
     #     if sense is not None:
@@ -169,30 +191,40 @@ def construct_abstractions(sentence, extract_method="pos"):
         sense = disambiguate(sentence, word)
         if sense is not None:
             unique = set(h for h in get_hypernyms(sense) if h != word)
-            hypernym_map[word] = unique
+            if unique:
+                hypernym_map[word] = list(unique)
             unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
-            synonym_map[word] = unique_syn
+            if unique_syn:
+                synonym_map[word] = list(unique_syn)
         # elif abstract_method == "similar_tos":
         #     unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
         #     abstraction_map[word] = list(unique)[:5]
-        
-            
+
+    if entity == True:
+        entity_abstractions = replace_named_entities(sentence) 
+    
+    hyp_sentences.extend(entity_abstractions)
+     
     for word in hypernym_map:
-        for syn in hypernym_map[word]:
+        for syn in hypernym_map[word][1:]:
             out = sentence.replace(word, syn).replace("_", " ")
             hyp_sentences.append(out)
-
     for word in synonym_map:
-        for syn in synonym_map[word]:
+        for syn in synonym_map[word][1:]:
             out = sentence.replace(word, syn).replace("_", " ")
-            syn_sentences.append(out)
+            syn_sentences.append(out) 
     random.shuffle(hyp_sentences)
     random.shuffle(syn_sentences)
-   
-    syn_sentences.extend([sentence]*5)
-    hyp_sentences.extend([sentence]*5)
-    # hyp_sentences.extend(["None"]*5)
-    # syn_sentences.extend(["None"]*5)
+    # make sure each word is abstracted by hypernym atleast once   
+    for word in hypernym_map:
+        out = sentence.replace(word, hypernym_map[word][0]).replace("_", " ")
+        hyp_sentences.append(out)
+
+    # make sure each word is abstracted by synonym atleast once  
+    for word in synonym_map:
+        out = sentence.replace(word, synonym_map[word][0]).replace("_", " ")
+        syn_sentences.append(out)
+
     return hyp_sentences, syn_sentences
         
 
@@ -214,10 +246,9 @@ def all_sentence_abstractions(text):
 if __name__ == "__main__":
     print(" Generate Abstractions for a sample input based on hypernyms and synonyms from wordnet")
     sent = "The President of the United States announced that he is resigning."  #A dog and its companions sitting on a couch.
-    # doc = nlp(sent)
     # get_chunks(doc)
-    h, s = construct_abstractions(sent)
-    print(h, s)
+    # h, s = construct_abstractions(sent)
+    # print(h, s)
 
 
 

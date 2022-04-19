@@ -138,6 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--key', type=str, default='api.key')
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--abstraction_method', type=str, default='premise') # 'hypothesis', 'premise', 'both
     args = parser.parse_args()
     print(args)
 
@@ -160,14 +161,14 @@ if __name__ == '__main__':
     if args.sample:
         assert(args.sample <= len(examples))
         examples = random.sample(examples, args.sample)
-    accs = score(model, args.model, encoder, examples, stem, args.split, args.batch)
+    accs = score(model, args.model, encoder, examples, stem, args.split, args.batch, args.abstraction_method)
 
     # print results
     print("#####################################################")
     print(f'{name} gets {accs}% on {args.dataset}')
     for key, value in accs.items():
         accs[key] = round(accs[key], 3)
-    print('lm lm_wt lm_hyp lm_hyp_wt lm_hyp_avg lm_syn lm_syn_wt lm_syn_avg token_mean pmi dcpmi')
+    print('lm lm_wt lm_hyp lm_hyp_wt lm_hyp_avg lm_syn lm_syn_wt lm_syn_avg lm_syn_hyp lm_syn_hyp_wt lm_syn_hyp_avg token_mean pmi dcpmi')
     # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
-    print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_hyp']}, {accs['lm_hyp_wt']}, {accs['lm_hyp_avg']}, {accs['lm_syn']}, {accs['lm_syn_wt']}, {accs['lm_syn_avg']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
+    print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_hyp']}, {accs['lm_hyp_wt']}, {accs['lm_hyp_avg']}, {accs['lm_syn']}, {accs['lm_syn_wt']}, {accs['lm_syn_avg']}, {accs['lm_syn_hyp']}, {accs['lm_syn_hyp_wt']}, {accs['lm_syn_hyp_avg']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
 
