@@ -82,7 +82,7 @@ def get_synonyms(synset, tag=wn.NOUN):
     for lemma in synset.lemmas():
         yield lemma.name()
 
-def get_hypernyms(sense, tag=wn.NOUN, K=3):
+def get_hypernyms(sense, tag=wn.NOUN, K=2):
     # Consider only upto K levels up in shortest path
     paths = sense.hypernym_paths()
     shortest_path = None
@@ -192,6 +192,15 @@ def construct_abstractions(sentence, entity=False, phrases=False):
             if unique_syn:
                 synonym_map[word] = list(unique_syn)
 
+    # synonyms
+    all_words = extract_pos_based(doc,POS_ALLOWED={"ADJ, VERB"})
+    for word in all_words:
+        sense = disambiguate(sentence, word)
+        if sense is not None:
+            unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
+            if unique_syn:
+                synonym_map[word] = list(unique_syn)
+
     # Deal with chunks
     if phrases:
         for phrase in noun_phrases:
@@ -209,7 +218,7 @@ def construct_abstractions(sentence, entity=False, phrases=False):
     if entity:
         entity_abstractions = replace_named_entities(sentence, doc) 
         if entity_abstractions:
-            print("entity abstraction ", sentence, entity_abstractions)
+            #print("entity abstraction ", sentence, entity_abstractions)
             hyp_sentences.extend(entity_abstractions)
 
 

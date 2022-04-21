@@ -8,7 +8,7 @@ import sys
 import time
 import os
 import re
-from statistics import mean
+from statistics import mean, stdev
 from abstract_examples import construct_abstractions
 
 def detokenizer(string):
@@ -450,7 +450,7 @@ def process_abstractions(opt, opt_raw, encoder, mode):
             premise_hypernyms, premise_synonyms = construct_abstractions(opt_raw['premise'])
             premise_hypernyms = premise_hypernyms[:N_P] + [opt_raw['premise']]
             premise_synonyms = premise_synonyms[:N_P] + [opt_raw['premise']]
-        hypothesis_hypernyms, hypothesis_synonyms = [opt['hypothesis']], [opt['hypothesis']]
+        hypothesis_hypernyms, hypothesis_synonyms = [opt_raw['hypothesis']], [opt_raw['hypothesis']]
     elif mode == 'hypothesis':
         N_P = 1
         N_H = 5
@@ -461,7 +461,7 @@ def process_abstractions(opt, opt_raw, encoder, mode):
             hypothesis_hypernyms, hypothesis_synonyms = construct_abstractions(opt_raw['hypothesis'])
             hypothesis_hypernyms = hypothesis_hypernyms[:N_H] + [opt_raw['hypothesis']]
             hypothesis_synonyms = hypothesis_synonyms[:N_H] + [opt_raw['hypothesis']]
-        premise_hypernyms, premise_synonyms = [opt['premise']], [opt['premise']]
+        premise_hypernyms, premise_synonyms = [opt_raw['premise']], [opt_raw['premise']]
     else:
         N_P = 5
         N_H = 5
@@ -501,7 +501,7 @@ def process_abstractions(opt, opt_raw, encoder, mode):
     return opt, N_H, N_P
 
 
-def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog = False, cache = None, mode='premise'):
+def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog = False, cache = None, mode='premise', stem=''):
     '''
     
     if prelog is true, then we're just logging calculations to do in one big batch calculate
@@ -585,33 +585,58 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                                             [opt['hypernym_premise'][i] for opt in options], 
                                             [opt['hypernym_hypothesis'][j] for opt in options],
                                             model, cache=cache, batch=batch, calculate = calculate)
-                raw_text.append([opt['raw_hypernym_premise'][i] + opt['raw_hypernym_hypothesis'][j] for opt in options])
+                raw_text.append([(opt['raw_hypernym_premise'][i] + '<BREAK>' + opt['raw_hypernym_hypothesis'][j]) for opt in options])
+      
                 all_ces.append(abs_cond_ce)
                 all_wts.append(abs_wt)
 
 
-        print([[item[i] for item in all_ces]for i in range(len(options))])
-        print([[item[i] for item in raw_text]for i in range(len(options))])
+
+        # print([[all_ces[j], raw_text[j] for j in range(len(all_ces))] for i in range(len(options))])
         abstrated_ce = [min([item[i] for item in all_ces]) for i in range(len(options))]
         abstracted_avg = [mean([item[i] for item in all_ces]) for i in range(len(options))]
+        abstracted_sd = [stdev([item[i] for item in all_ces]) for i in range(len(options))]
+
+        # Print scores of hypernym abstractions
+        if not prelog:
+            for i in range(len(options)): # each array has a tiny array inside of length = options
+                for item1, item2, item3 in zip(raw_text, all_ces, all_wts):
+                    with open(f"{stem}/scores_hyp.txt", "a") as myfile:
+                        myfile.write(f",{item1[i]},{item2[i]},{item3[i]}\n")
+
+            with open(f"{stem}/sd_hyp.txt", "a") as myfile:
+                myfile.write(str(abstracted_sd[0]) + "\n")
+
         abstrated_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
         # print("Hypernym most plausible ", abstrated_ce)
 
         ## get conditional CEs for all synonyms
         all_syn_ces = [cond_ce]
         all_syn_wts = [wt]
+        raw_text_s = []
         for i in range(N_P):
             for j in range(N_H):
                 syn_cond_ce, syn_wt = cross_entropy_list( 
                                                 [opt['synonym_premise'][i] for opt in options], 
                                                 [opt['synonym_hypothesis'][j] for opt in options],
                                                 model, cache=cache, batch=batch, calculate = calculate)
+                raw_text_s.append([(opt['raw_synonym_premise'][i] + '<BREAK>' + opt['raw_synonym_hypothesis'][j]) for opt in options])
                 all_syn_ces.append(syn_cond_ce)
                 all_syn_wts.append(syn_wt)
 
         syn_ce = [min([item[i] for item in all_syn_ces]) for i in range(len(options))]
         syn_avg = [mean([item[i] for item in all_syn_ces]) for i in range(len(options))]
+        syn_sd = [stdev([item[i] for item in all_syn_ces]) for i in range(len(options))]
         syn_wt_ce = [min([item[i] for item in all_syn_wts]) for i in range(len(options))]
+        # Print scores of synonym abstractions
+        if not prelog:
+            for i in range(len(options)): # each array has a tiny array inside of length = options
+                for item1, item2, item3 in zip(raw_text_s, all_syn_ces, all_syn_wts):
+                    with open(f"{stem}/scores_syn.txt", "a") as myfile:
+                        myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
+
+            with open(f"{stem}/sd_syn.txt", "a") as myfile:
+                myfile.write(str(syn_sd[0]) + "\n")
 
         ## get ce by including synonym and hypernym
         all_ces.extend(all_syn_ces)
@@ -682,7 +707,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
            }
     return pred
 
-def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none'):
+def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none', stem=''):
     '''
     This is designed for gpt2-style language models
     
@@ -734,13 +759,13 @@ def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none'
     if cache is not None:
         print('logging examples')
         for example in tqdm( examples):
-            _ = inference_autobatch_abstracted(model, encoder, example, prelog=True, cache = cache, batch=batch, mode=abstraction_method)
+            _ = inference_autobatch_abstracted(model, encoder, example, prelog=True, cache = cache, batch=batch, mode=abstraction_method, stem=stem)
 
     ## in this loop, we actually do the calculations from above in efficient batches, storing results 
     ## in the cache and calculating actual predictions
     print('actually calculating')
     for example in tqdm(examples):
-        pred = inference_autobatch_abstracted(model, encoder, example, prelog=False, cache = cache, batch=batch, mode=abstraction_method)
+        pred = inference_autobatch_abstracted(model, encoder, example, prelog=False, cache = cache, batch=batch, mode=abstraction_method, stem=stem)
         predictions_list.append(pred)
 
     labels = [ex['label'] for ex in examples]
@@ -770,7 +795,7 @@ def score(model, model_name, encoder, examples, stem, split, batch, abstraction_
     with open(hist_path, 'r') as f:
         cache = json.loads(f.read())
         
-    accs, preds = fwd(model, encoder, examples, batch, cache, abstraction_method)
+    accs, preds = fwd(model, encoder, examples, batch, cache, abstraction_method, stem)
     
     print('='*50)
     print('saving cache to {}'.format(hist_path))

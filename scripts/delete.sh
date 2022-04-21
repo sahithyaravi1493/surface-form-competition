@@ -13,3 +13,9 @@ rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/sst-5/gpt2-dev.hi
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/storycloze/gpt2-dev.hist
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/trec/gpt2-dev.hist
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/rte/gpt2-dev.hist 
+
+# abstraction logs
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/copa/sd_hyp.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/copa/sd_syn.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/copa/scores_hyp.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/copa/scores_syn.txt
