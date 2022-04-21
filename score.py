@@ -138,7 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--key', type=str, default='api.key')
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--abstraction_method', type=str, default='premise') # 'hypothesis', 'premise', 'both
+    parser.add_argument('--abstraction_method', type=str, default='premise') # 'hypothesis', 'premise', 'both'
     args = parser.parse_args()
     print(args)
 

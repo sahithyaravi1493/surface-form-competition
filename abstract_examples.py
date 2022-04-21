@@ -18,7 +18,7 @@ model, tokenizer = load_model(model_dir)
 
 #nltk downloads
 
-nlp = spacy.load("en_core_web_md")
+nlp = spacy.load("en_core_web_lg")
 dir = '/ubc/cs/research/nlp/sahiravi/datasets/caches'
 nltk.download('omw-1.4', download_dir=dir)
 nltk.download('wordnet', download_dir=dir)
@@ -31,28 +31,30 @@ OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
 
 entity_maps = {
-    'ORG' : 'organization', 
-    'DATE': 'date', 
-    'GPE': 'location', 
     'PERSON': 'person', 
-    'MONEY':'money', 
-    'PRODUCT':'object', 
-    'TIME':'time', 
-    'WORK_OF_ART':'title', 
-    'QUANTITY':'quantity', 
-    'NORP':'group', 
-    'LOC':'location',
-    'EVENT':'event', 
-    'LAW':'law', 
-    'LANGUAGE':'language'
+    # 'ORG' : 'organization', 
+    # 'DATE': 'date', 
+    # 'GPE': 'location', 
+    # 'MONEY':'money', 
+    # 'PRODUCT':'object', 
+    # 'TIME':'time', 
+    # 'WORK_OF_ART':'title', 
+    # 'QUANTITY':'quantity', 
+    # 'NORP':'group', 
+    # 'LOC':'location',
+    # 'EVENT':'event', 
+    # 'LAW':'law', 
+    # 'LANGUAGE':'language'
     }
 
 def replace_named_entities(sentence, doc):
-    entity_abstracted_sentences = []
+    entity_relabeled_sentence = sentence
+    relabeled = False
     for ent in doc.ents:
         if ent.label_ in entity_maps:
-            entity_abstracted_sentences.append(sentence.replace(ent.text, entity_maps[ent.label_]))
-    return entity_abstracted_sentences
+            entity_relabeled_sentence  = entity_relabeled_sentence.replace(ent.text, entity_maps[ent.label_])
+            relabeled = True
+    return [entity_relabeled_sentence] if relabeled else []
 
 def load_text(path):
     with open(path) as f:
@@ -134,7 +136,8 @@ def extract_pos_based(doc, POS_ALLOWED):
 def get_chunks(doc):
     noun_phrases = set()
     for chunk in doc.noun_chunks:
-        noun_phrases.add(chunk.text) # chunk.root.text, chunk.root.dep_, chunk.root.head.text
+        if len(chunk.text.split()) > 1:
+            noun_phrases.add(chunk.text) # chunk.root.text, chunk.root.dep_, chunk.root.head.text
     return noun_phrases
 
 # wup_similarity
@@ -161,32 +164,24 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, extract_method="pos"):
+def construct_abstractions(sentence, entity=False, phrases=False):
     doc = nlp(sentence)
+
+    # Get noun chunks
     noun_phrases = get_chunks(doc)
-    if extract_method == "svo":
-        subject, verb, attribute, all_words = extract_svo(doc)
-    elif extract_method == "pos":
-        all_words = extract_pos_based(doc,POS_ALLOWED={"NOUN"})
-        # all_words.extend(extract_pos_based(doc, POS_ALLOWED = {"ADJ"}))
 
-
+    # Mapping of words in given sentence to abstractions
     hypernym_map = {}
     synonym_map = {}
 
-    hyp_sentences = [sentence]*5
-    syn_sentences = [sentence]*5
-    # for phrase in noun_phrases:
-    #     sense = disambiguate(sentence, phrase)
-    #     if sense is not None:
-    #         unique = set(h for h in get_hypernyms(sense) if h != phrase)
-    #         hypernym_map[phrase] = unique
-    #         unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != phrase)
-    #         synonym_map[phrase] = unique_syn
-    
-    # print(hypernym_map)
-    # print(synonym_map)
+    # We start with 5 spare abstractions = sentence
+    hyp_sentences = []
+    syn_sentences = []
 
+    # Form sentences with abstractions
+    # Deal with 1-word nouns/verbs/ADJ
+    # Get POS from sentence
+    all_words = extract_pos_based(doc,POS_ALLOWED={"NOUN"})
     for word in all_words:
         sense = disambiguate(sentence, word)
         if sense is not None:
@@ -196,35 +191,42 @@ def construct_abstractions(sentence, extract_method="pos"):
             unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
             if unique_syn:
                 synonym_map[word] = list(unique_syn)
-        # elif abstract_method == "similar_tos":
-        #     unique = set(synonym for synonym in get_all_also_sees(word) if synonym != word)
-        #     abstraction_map[word] = list(unique)[:5]
 
-    if entity == True:
-        entity_abstractions = replace_named_entities(sentence) 
-    
-    hyp_sentences.extend(entity_abstractions)
-     
+    # Deal with chunks
+    if phrases:
+        for phrase in noun_phrases:
+            sense = disambiguate(sentence, phrase)
+            if sense is not None:
+                unique = set(h for h in get_hypernyms(sense) if h != phrase)
+                if unique:
+                    hypernym_map[phrase] = list(unique)
+                unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != phrase)
+                if unique_syn:
+                    synonym_map[phrase] = list(unique_syn)
+                    #print(f"PHRASE {phrase}", unique_syn)
+
+    # Abstract named entities to their labels
+    if entity:
+        entity_abstractions = replace_named_entities(sentence, doc) 
+        if entity_abstractions:
+            print("entity abstraction ", sentence, entity_abstractions)
+            hyp_sentences.extend(entity_abstractions)
+
+
     for word in hypernym_map:
-        for syn in hypernym_map[word][1:]:
+        for syn in hypernym_map[word][0:]:
             out = sentence.replace(word, syn).replace("_", " ")
             hyp_sentences.append(out)
     for word in synonym_map:
-        for syn in synonym_map[word][1:]:
+        for syn in synonym_map[word][0:]:
             out = sentence.replace(word, syn).replace("_", " ")
             syn_sentences.append(out) 
+    
     random.shuffle(hyp_sentences)
     random.shuffle(syn_sentences)
-    # make sure each word is abstracted by hypernym atleast once   
-    for word in hypernym_map:
-        out = sentence.replace(word, hypernym_map[word][0]).replace("_", " ")
-        hyp_sentences.append(out)
-
-    # make sure each word is abstracted by synonym atleast once  
-    for word in synonym_map:
-        out = sentence.replace(word, synonym_map[word][0]).replace("_", " ")
-        syn_sentences.append(out)
-
+    
+    hyp_sentences.extend([sentence]*5)
+    syn_sentences.extend([sentence]*5)
     return hyp_sentences, syn_sentences
         
 
