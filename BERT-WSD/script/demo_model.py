@@ -21,7 +21,7 @@ MAX_SEQ_LENGTH = 64
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def get_predictions(model, tokenizer, sentence):
+def get_predictions(model, tokenizer, sentence, pos=['n']):
     re_result = re.search(r"\[TGT\](.*)\[TGT\]", sentence)
     if re_result is None:
         print("\nIncorrect input format. Please try again.")
@@ -32,9 +32,10 @@ def get_predictions(model, tokenizer, sentence):
     definitions = []
     syns = []
     for sense_key, t in get_glosses(ambiguous_word, None).items():
-        sense_keys.append(sense_key)
-        definitions.append(t[0])
-        syns.append(t[1])
+        if (t[1].pos()) in pos:
+            sense_keys.append(sense_key)
+            definitions.append(t[0])
+            syns.append(t[1])
 
     record = GlossSelectionRecord("test", sentence, sense_keys, definitions, [-1])
     features = _create_features_from_records([record], MAX_SEQ_LENGTH, tokenizer,

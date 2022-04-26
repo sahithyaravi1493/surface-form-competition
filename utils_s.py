@@ -442,36 +442,36 @@ def process_abstractions(opt, opt_raw, encoder, mode):
     opt['raw_premise'] = opt_raw['premise']
     opt['raw_hypothesis'] = opt_raw['hypothesis']
     if mode == 'premise':
-        N_P = 5
+        N_P = 4
         N_H = 1
         if opt_raw['premise'] in hypernym_cache:
              premise_hypernyms, premise_synonyms = hypernym_cache[opt_raw['premise']], synonym_cache[opt_raw['premise']]
         else:
             premise_hypernyms, premise_synonyms = construct_abstractions(opt_raw['premise'])
-            premise_hypernyms = premise_hypernyms[:N_P] + [opt_raw['premise']]
-            premise_synonyms = premise_synonyms[:N_P] + [opt_raw['premise']]
+            premise_hypernyms = [opt_raw['premise']] + premise_hypernyms[:N_P]
+            premise_synonyms = [opt_raw['premise']] + premise_synonyms[:N_P] 
         hypothesis_hypernyms, hypothesis_synonyms = [opt_raw['hypothesis']], [opt_raw['hypothesis']]
     elif mode == 'hypothesis':
         N_P = 1
-        N_H = 5
+        N_H = 4
         if opt_raw['hypothesis'] in hypernym_cache:
              hypothesis_hypernyms, hypothesis_synonyms = hypernym_cache[opt_raw['hypothesis']], synonym_cache[opt_raw['hypothesis']]
         else:
             # Get abstractions of hypothesis
             hypothesis_hypernyms, hypothesis_synonyms = construct_abstractions(opt_raw['hypothesis'])
-            hypothesis_hypernyms = hypothesis_hypernyms[:N_H] + [opt_raw['hypothesis']]
-            hypothesis_synonyms = hypothesis_synonyms[:N_H] + [opt_raw['hypothesis']]
+            hypothesis_hypernyms = [opt_raw['hypothesis']] + hypothesis_hypernyms[:N_H]
+            hypothesis_synonyms = [opt_raw['hypothesis']] + hypothesis_synonyms[:N_H]
         premise_hypernyms, premise_synonyms = [opt_raw['premise']], [opt_raw['premise']]
     else:
-        N_P = 5
-        N_H = 5
+        N_P = 2
+        N_H = 2
         # Get abstractions of premise
         if opt_raw['premise'] in hypernym_cache:
              premise_hypernyms, premise_synonyms = hypernym_cache[opt_raw['premise']], synonym_cache[opt_raw['premise']]
         else:
             premise_hypernyms, premise_synonyms = construct_abstractions(opt_raw['premise'])
-            premise_hypernyms = premise_hypernyms[:N_P] + [opt_raw['premise']]
-            premise_synonyms = premise_synonyms[:N_P] + [opt_raw['premise']]
+            premise_hypernyms = [opt_raw['premise']] + premise_hypernyms[:N_P]
+            premise_synonyms = [opt_raw['premise']] + premise_synonyms[:N_P] 
         hypothesis_hypernyms, hypothesis_synonyms = [opt['hypothesis']], [opt['hypothesis']]
         # Get abstractions of hypothesis
         if opt_raw['hypothesis'] in hypernym_cache:
@@ -479,8 +479,8 @@ def process_abstractions(opt, opt_raw, encoder, mode):
         else:
             # Get abstractions of hypothesis
             hypothesis_hypernyms, hypothesis_synonyms = construct_abstractions(opt_raw['hypothesis'])
-            hypothesis_hypernyms = hypothesis_hypernyms[:N_H] + [opt_raw['hypothesis']]
-            hypothesis_synonyms = hypothesis_synonyms[:N_H] + [opt_raw['hypothesis']]
+            hypothesis_hypernyms = [opt_raw['hypothesis']] + hypothesis_hypernyms[:N_H]
+            hypothesis_synonyms = [opt_raw['hypothesis']] + hypothesis_synonyms[:N_H]
 
     # cache already seen abstractions saves time!!
     hypernym_cache[opt_raw['premise']] = premise_hypernyms
@@ -596,20 +596,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         abstrated_ce = [min([item[i] for item in all_ces]) for i in range(len(options))]
         abstracted_avg = [mean([item[i] for item in all_ces]) for i in range(len(options))]
         abstracted_sd = [stdev([item[i] for item in all_ces]) for i in range(len(options))]
-
-        # Print scores of hypernym abstractions
-        if not prelog:
-            for i in range(len(options)): # each array has a tiny array inside of length = options
-                for item1, item2, item3 in zip(raw_text, all_ces, all_wts):
-                    with open(f"{stem}/scores_hyp.txt", "a") as myfile:
-                        myfile.write(f",{item1[i]},{item2[i]},{item3[i]}\n")
-
-            with open(f"{stem}/sd_hyp.txt", "a") as myfile:
-                myfile.write(str(abstracted_sd[0]) + "\n")
-
         abstrated_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
-        # print("Hypernym most plausible ", abstrated_ce)
-
         ## get conditional CEs for all synonyms
         all_syn_ces = [cond_ce]
         all_syn_wts = [wt]
@@ -628,15 +615,6 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         syn_avg = [mean([item[i] for item in all_syn_ces]) for i in range(len(options))]
         syn_sd = [stdev([item[i] for item in all_syn_ces]) for i in range(len(options))]
         syn_wt_ce = [min([item[i] for item in all_syn_wts]) for i in range(len(options))]
-        # Print scores of synonym abstractions
-        if not prelog:
-            for i in range(len(options)): # each array has a tiny array inside of length = options
-                for item1, item2, item3 in zip(raw_text_s, all_syn_ces, all_syn_wts):
-                    with open(f"{stem}/scores_syn.txt", "a") as myfile:
-                        myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
-
-            with open(f"{stem}/sd_syn.txt", "a") as myfile:
-                myfile.write(str(syn_sd[0]) + "\n")
 
         ## get ce by including synonym and hypernym
         all_ces.extend(all_syn_ces)
@@ -688,6 +666,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
     lm_domain_cond_pred = domain_cond_ce.index(min(domain_cond_ce))
     dcpmi_pred = dcpmi.index(max(dcpmi))
     pmi_pred = pmi.index(max(pmi))
+
     pred = {
                  'lm': lm_pred,
                  'lm_wt': lm_pred_wt,
@@ -697,14 +676,46 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                  'lm_syn': lm_syn,
                  'lm_syn_avg': lm_syn_avg,
                  'lm_syn_wt': lm_syn_wt,
-                 'lm_syn_hyp': lm_syn,
-                 'lm_syn_hyp_avg': lm_syn_avg,
-                 'lm_syn_hyp_wt': lm_syn_wt,
+                 'lm_syn_hyp': lm_syn_hyp,
+                 'lm_syn_hyp_avg': lm_syn_hyp_avg,
+                 'lm_syn_hyp_wt': lm_syn_hyp_wt,
                  'tok_mean': lm_avg_pred,
                  'dcpmi' : dcpmi_pred,
                  'pmi': pmi_pred,
                  'domain_cond': lm_domain_cond_pred,
            }
+
+
+    # Worst token is different from lm score
+    if not prelog and lm_pred!=lm_pred_wt:
+        for i in range(len(options)): # each array has a tiny array inside of length = options
+            for item1, item2, item3 in zip(raw_text_s, all_syn_ces, all_syn_wts):
+                with open(f"{stem}/scores_wt.txt", "a") as myfile:
+                    myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
+                break
+
+    # abstraction score is different
+    if not prelog and lm_pred_wt!= lm_syn_wt:
+        for i in range(len(options)): # each array has a tiny array inside of length = options
+            for item1, item2, item3 in zip(raw_text_s, all_syn_ces, all_syn_wts):
+                with open(f"{stem}/scores_syn.txt", "a") as myfile:
+                    myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
+
+        with open(f"{stem}/sd_syn.txt", "a") as myfile:
+            myfile.write(str(syn_sd[0]) + "\n")
+
+    # Hypernym score is different
+    if not prelog and lm_pred_wt!= lm_abs_wt:
+        for i in range(len(options)): # each array has a tiny array inside of length = options
+            for item1, item2, item3 in zip(raw_text, all_ces, all_wts):
+                with open(f"{stem}/scores_hyp.txt", "a") as myfile:
+                    myfile.write(f",{item1[i]},{item2[i]},{item3[i]}\n")
+
+        with open(f"{stem}/sd_hyp.txt", "a") as myfile:
+            myfile.write(str(abstracted_sd[0]) + "\n")
+
+       
+        # print("Hypernym most plausible ", abstrated_ce)
     return pred
 
 def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none', stem=''):

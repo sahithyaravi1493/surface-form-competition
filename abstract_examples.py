@@ -1,6 +1,6 @@
 import spacy
 import re
-
+import json
 import pandas as pd
 from tqdm import tqdm
 import random
@@ -8,6 +8,10 @@ import nltk
 from nltk.corpus import wordnet as wn
 from nltk.wsd import lesk
 import sys, os
+import requests
+from wordhoard import Synonyms
+from bs4 import BeautifulSoup
+
 sys.path.append('/ubc/cs/research/nlp/sahiravi/surface-form-competition/BERT-WSD/script')
 random.seed(50)
 
@@ -31,7 +35,7 @@ OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
 
 entity_maps = {
-    'PERSON': 'person', 
+    'PERSON': 'a person', 
     # 'ORG' : 'organization', 
     # 'DATE': 'date', 
     # 'GPE': 'location', 
@@ -46,6 +50,51 @@ entity_maps = {
     # 'LAW':'law', 
     # 'LANGUAGE':'language'
     }
+
+def synonyms_web(word):
+    URL = f'https://www.thesaurus.com/browse/{word}'
+
+    page = requests.get(URL)
+    if page.status_code == 200:
+        soup = BeautifulSoup(page.content, 'html.parser')
+
+    the_script = soup.find('script', text=re.compile("window.INITIAL_STATE"))
+    the_script = the_script.text
+    the_script = the_script.replace("window.INITIAL_STATE = ", "")
+    the_script = the_script.replace(':undefined', ':"undefined"')
+    the_script = the_script.replace(';', '')
+    data = json.loads(the_script, encoding='utf-8')
+
+    # with open('test1.json', 'w', encoding='utf-8') as f:
+    #     json.dump(data, f, ensure_ascii=False, indent=4)
+
+    all_senses = []
+ 
+    for each_tab in data["searchData"]["tunaApiData"]["posTabs"]:
+        senses = {}
+        if each_tab["pos"] == "noun":
+            senses['definition'] = each_tab['definition']
+            lst = []
+            for syn in each_tab["synonyms"]:
+                sim = float(syn["similarity"])
+                if sim > 50:
+                    lst.append(syn['term'])
+            senses['synonyms'] = lst
+        if senses:
+            all_senses.append(senses)
+    #print(all_senses)
+    return all_senses
+
+# def synonyms_web(term):
+#     # synonym = Synonyms(search_string=term)
+#     # synonym_results = synonym.find_synonyms()
+#     # return synonym_results
+#     response = requests.get('https://www.thesaurus.com/browse/{}'.format(term))
+#     soup = BeautifulSoup(response.text, 'lxml')
+#     # method 1 
+#     syns = soup.select('.MainContentContainer > section > .synonyms-container a')
+#     return syns
+#     # method 2 return [span.text for span in soup.findAll('a', {'class': 'css-17ofzyv e1ccqdb60'})] # 'css-1gyuw4i eh475bn0' for less relevant synonyms
 
 def replace_named_entities(sentence, doc):
     entity_relabeled_sentence = sentence
@@ -78,11 +127,26 @@ def get_all_similar_tos(word, tag=wn.NOUN):
                 for lemma in sim.lemma_names():
                     yield (lemma, sim.name())
 
-def get_synonyms(synset, tag=wn.NOUN):
-    for lemma in synset.lemmas():
-        yield lemma.name()
+def get_synonyms(synset, word, tag=wn.NOUN):
+    print(synset.definition())
 
-def get_hypernyms(sense, tag=wn.NOUN, K=2):
+    synonyms = []
+    # Wordnet synonyms
+    for lemma in synset.lemmas():
+        synonyms.append(lemma.name())
+
+    # Web synonyms
+    web_synonym_senses = synonyms_web(word)
+    if web_synonym_senses:
+        for sense_dict in web_synonym_senses:
+            candidate = sense_dict["synonyms"][0]
+            candidate_sense = wn.synsets(candidate)[0]
+            if synset.wup_similarity(candidate_sense) > 0.5:
+                synonyms.extend(sense_dict["synonyms"])
+                break
+    return synonyms
+
+def get_hypernyms(sense, tag=wn.NOUN, K=3):
     # Consider only upto K levels up in shortest path
     paths = sense.hypernym_paths()
     shortest_path = None
@@ -91,9 +155,12 @@ def get_hypernyms(sense, tag=wn.NOUN, K=2):
         if len(path) < shortest_len:
             shortest_len = len(path)
             shortest_path = path
-    
-    shortest_path = shortest_path[-K:]
     # print("shortest path", shortest_path)
+    if len(shortest_path) > 5:
+        shortest_path = shortest_path[-K:]
+    else:
+        # avoid "entity" level
+        shortest_path = shortest_path[-1:]
 
     for synset in shortest_path:
         for lemma in synset.lemmas()[:1]:
@@ -102,15 +169,14 @@ def get_hypernyms(sense, tag=wn.NOUN, K=2):
 def disambiguate(sentence, word, method="bert"):
     # uses most frequent sense or lesk
     sense = None
+    if wn.synsets(word):
+        sense = wn.synsets(word)[0]
     if method=="bert":
-        sense = get_bert_predictions(sentence, word)
-        if sense is None and wn.synsets(word):
-            sense = wn.synsets(word)[0]
+        bert_pred = get_bert_predictions(sentence, word)
+        if bert_pred is not None:
+            sense = bert_pred
     elif method == "lesk":
         sense = lesk(sentence, word, "n")
-    elif method == "frequency":
-        if wn.synsets(word):
-            sense = wn.synsets(word)[0]
             
     return sense
 
@@ -119,6 +185,7 @@ def get_bert_predictions(sentence, word):
     out = None
     word_tgt = f"[TGT]{word}[TGT]"
     p = get_predictions(model, tokenizer, sentence.replace(word,word_tgt))
+    # print(p)
     if p:
         out = p[0][1]
     else:
@@ -164,102 +231,80 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, entity=False, phrases=False):
+def construct_abstractions(sentence, entity=True, phrases=True):
     doc = nlp(sentence)
-
-    # Get noun chunks
     noun_phrases = get_chunks(doc)
 
-    # Mapping of words in given sentence to abstractions
     hypernym_map = {}
     synonym_map = {}
-
-    # We start with 5 spare abstractions = sentence
     hyp_sentences = []
     syn_sentences = []
 
-    # Form sentences with abstractions
-    # Deal with 1-word nouns/verbs/ADJ
-    # Get POS from sentence
-    all_words = extract_pos_based(doc,POS_ALLOWED={"NOUN"})
-    for word in all_words:
+    all_words = extract_pos_based(doc, POS_ALLOWED={"NOUN"})
+    if phrases:
+        all_words.extend(noun_phrases)
+    
+    for word in set(all_words):
         sense = disambiguate(sentence, word)
+        
         if sense is not None:
             unique = set(h for h in get_hypernyms(sense) if h != word)
             if unique:
                 hypernym_map[word] = list(unique)
-            unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
+            unique_syn = list(set(synonym for synonym in get_synonyms(sense, word) if synonym != word))
             if unique_syn:
-                synonym_map[word] = list(unique_syn)
-
-    # synonyms
-    all_words = extract_pos_based(doc,POS_ALLOWED={"ADJ, VERB"})
-    for word in all_words:
-        sense = disambiguate(sentence, word)
-        if sense is not None:
-            unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != word)
-            if unique_syn:
-                synonym_map[word] = list(unique_syn)
-
-    # Deal with chunks
-    if phrases:
-        for phrase in noun_phrases:
-            sense = disambiguate(sentence, phrase)
-            if sense is not None:
-                unique = set(h for h in get_hypernyms(sense) if h != phrase)
-                if unique:
-                    hypernym_map[phrase] = list(unique)
-                unique_syn = set(synonym for synonym in get_synonyms(sense) if synonym != phrase)
-                if unique_syn:
-                    synonym_map[phrase] = list(unique_syn)
-                    #print(f"PHRASE {phrase}", unique_syn)
+                synonym_map[word] = unique_syn
 
     # Abstract named entities to their labels
     if entity:
         entity_abstractions = replace_named_entities(sentence, doc) 
         if entity_abstractions:
-            #print("entity abstraction ", sentence, entity_abstractions)
             hyp_sentences.extend(entity_abstractions)
 
-
+    # make sure each word is abstracted by hypernym atleast once   
     for word in hypernym_map:
-        for syn in hypernym_map[word][0:]:
+        out = sentence.replace(word, hypernym_map[word][0]).replace("_", " ")
+        hyp_sentences.append(out)
+    for word in synonym_map:
+        out = sentence.replace(word, synonym_map[word][0]).replace("_", " ")
+        syn_sentences.append(out)
+    for word in hypernym_map:
+        for syn in hypernym_map[word][1:]:
             out = sentence.replace(word, syn).replace("_", " ")
             hyp_sentences.append(out)
     for word in synonym_map:
-        for syn in synonym_map[word][0:]:
+        for syn in synonym_map[word][1:]:
             out = sentence.replace(word, syn).replace("_", " ")
             syn_sentences.append(out) 
     
-    random.shuffle(hyp_sentences)
-    random.shuffle(syn_sentences)
-    
+    # random.shuffle(hyp_sentences)
+    # random.shuffle(syn_sentences)  
     hyp_sentences.extend([sentence]*5)
     syn_sentences.extend([sentence]*5)
     return hyp_sentences, syn_sentences
         
 
-def all_sentence_abstractions(text):
-    abstracted_sentences = []
-    indices = []
-    for i in tqdm(range(len(text))):
-        sentences = construct_abstractions(text[i], extract_method="pos", abstract_method="hypernyms")
-        sentences.append(text[i])
-        abstracted_sentences.extend(sentences)
-        indices.extend([i]*len(sentences))
-    df = pd.DataFrame()
-    df["gen_id"] = indices
-    df["abstractions"] = abstracted_sentences
-    return df
+# def all_sentence_abstractions(text):
+#     abstracted_sentences = []
+#     indices = []
+#     for i in tqdm(range(len(text))):
+#         sentences = construct_abstractions(text[i], extract_method="pos", abstract_method="hypernyms")
+#         sentences.append(text[i])
+#         abstracted_sentences.extend(sentences)
+#         indices.extend([i]*len(sentences))
+#     df = pd.DataFrame()
+#     df["gen_id"] = indices
+#     df["abstractions"] = abstracted_sentences
+#     return df
 
 
 # gather the user input and gather the info
 if __name__ == "__main__":
-    print(" Generate Abstractions for a sample input based on hypernyms and synonyms from wordnet")
-    sent = "The President of the United States announced that he is resigning."  #A dog and its companions sitting on a couch.
-    # get_chunks(doc)
-    # h, s = construct_abstractions(sent)
-    # print(h, s)
+    # Input example
+    sentence = "He adds some type of fertilizer to the potted plant." 
+    # get sentences by substituting words with hypernyms and synonyms
+    hypernym_sentences, synonym_sentences = construct_abstractions(sentence)
+    print(synonym_sentences)
 
 
 
