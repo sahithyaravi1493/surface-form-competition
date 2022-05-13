@@ -40,11 +40,11 @@ rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_hyp.tx
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_syn.txt
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_wt.txt
 
-rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/sd_hyp.txt
-rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/sd_syn.txt
-rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_hyp.txt
-rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_syn.txt
-rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cqa/scores_wt.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cb/sd_hyp.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cb/sd_syn.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cb/scores_hyp.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cb/scores_syn.txt
+rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/cb/scores_wt.txt
 
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/hellaswag/sd_hyp.txt
 rm /ubc/cs/research/nlp/sahiravi/surface-form-competition/data/hellaswag/sd_syn.txt

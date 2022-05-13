@@ -35,7 +35,7 @@ OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
 
 entity_maps = {
-    'PERSON': 'a person', 
+    'PERSON': ['Alex', 'Blake', 'Avery', 'Jessie', 'Cassie', 'Jackie'], 
     # 'ORG' : 'organization', 
     # 'DATE': 'date', 
     # 'GPE': 'location', 
@@ -51,39 +51,72 @@ entity_maps = {
     # 'LANGUAGE':'language'
     }
 
-def synonyms_web(word):
+def synonyms_wordhoard(word, synset):
+    from wordhoard import Synonyms
+    candidate_sense = None
+    synonyms = []
+    synonym = Synonyms(search_string=word)
+    synonym_results = synonym.find_synonyms()
+    print(synonym_results)
+    if synonym_results:
+        for candidate in synonym_results:
+            if wn.synsets(candidate, pos=wn.NOUN):
+                candidate_sense = wn.synsets(candidate)[0] # assume the sense is the most frequent sense?
+                if synset.wup_similarity(candidate_sense) > 0.8:
+                    synonyms.append(candidate)
+          
+    return synonyms
+
+
+
+def synonyms_web(word, synset):
     URL = f'https://www.thesaurus.com/browse/{word}'
+    all_senses = []
 
     page = requests.get(URL)
     if page.status_code == 200:
         soup = BeautifulSoup(page.content, 'html.parser')
+        the_script = soup.find('script', text=re.compile("window.INITIAL_STATE"))
+        the_script = the_script.text
+        the_script = the_script.replace("window.INITIAL_STATE = ", "")
+        the_script = the_script.replace(':undefined', ':"undefined"')
+        the_script = the_script.replace(';', '')
+        data = json.loads(the_script, encoding='utf-8')
 
-    the_script = soup.find('script', text=re.compile("window.INITIAL_STATE"))
-    the_script = the_script.text
-    the_script = the_script.replace("window.INITIAL_STATE = ", "")
-    the_script = the_script.replace(':undefined', ':"undefined"')
-    the_script = the_script.replace(';', '')
-    data = json.loads(the_script, encoding='utf-8')
+        # with open('test1.json', 'w', encoding='utf-8') as f:
+        #     json.dump(data, f, ensure_ascii=False, indent=4)
 
-    # with open('test1.json', 'w', encoding='utf-8') as f:
-    #     json.dump(data, f, ensure_ascii=False, indent=4)
 
-    all_senses = []
- 
-    for each_tab in data["searchData"]["tunaApiData"]["posTabs"]:
-        senses = {}
-        if each_tab["pos"] == "noun":
-            senses['definition'] = each_tab['definition']
-            lst = []
-            for syn in each_tab["synonyms"]:
-                sim = float(syn["similarity"])
-                if sim > 50:
+    
+        for each_tab in data["searchData"]["tunaApiData"]["posTabs"]:
+            senses = {}
+            if each_tab["pos"] == "noun":
+                
+                lst = []
+                sims_list = []
+                for syn in each_tab["synonyms"]:
+                    sim = float(syn["similarity"])
+                    sims_list.append(sim)
                     lst.append(syn['term'])
-            senses['synonyms'] = lst
-        if senses:
-            all_senses.append(senses)
+                lst = [l[1] for l in sorted(zip(sims_list, lst), reverse=True)]
+                if lst:
+                    senses['synonyms'] = lst
+                    senses['definition'] = each_tab['definition']
+            if senses:
+                all_senses.append(senses)
+    synonyms = []
+    if all_senses:
+        for sense_dict in all_senses:
+            for candidate in sense_dict["synonyms"]:
+                if wn.synsets(candidate):
+                    candidate_sense = wn.synsets(candidate)[0] # assume the sense is the most frequent sense?
+                    break
+            if candidate_sense is not None:
+                if synset.wup_similarity(candidate_sense) > 0.6:
+                    synonyms.extend(sense_dict["synonyms"])
+                    break
     #print(all_senses)
-    return all_senses
+    return synonyms
 
 # def synonyms_web(term):
 #     # synonym = Synonyms(search_string=term)
@@ -99,9 +132,12 @@ def synonyms_web(word):
 def replace_named_entities(sentence, doc):
     entity_relabeled_sentence = sentence
     relabeled = False
+    i = 0
     for ent in doc.ents:
         if ent.label_ in entity_maps:
-            entity_relabeled_sentence  = entity_relabeled_sentence.replace(ent.text, entity_maps[ent.label_])
+            entity_relabeled_sentence  = entity_relabeled_sentence.replace(ent.text, entity_maps[ent.label_][i])
+            print("replace person name ", entity_relabeled_sentence)
+            i += 1
             relabeled = True
     return [entity_relabeled_sentence] if relabeled else []
 
@@ -128,23 +164,19 @@ def get_all_similar_tos(word, tag=wn.NOUN):
                     yield (lemma, sim.name())
 
 def get_synonyms(synset, word, tag=wn.NOUN):
-    print(synset.definition())
+    # print(synset.definition())
 
     synonyms = []
+    # Web synonyms
+    candidate_sense = None
+    web_synonyms = synonyms_web(word, synset)
+    synonyms.extend(web_synonyms)
+    
     # Wordnet synonyms
     for lemma in synset.lemmas():
-        synonyms.append(lemma.name())
-
-    # Web synonyms
-    web_synonym_senses = synonyms_web(word)
-    if web_synonym_senses:
-        for sense_dict in web_synonym_senses:
-            candidate = sense_dict["synonyms"][0]
-            candidate_sense = wn.synsets(candidate)[0]
-            if synset.wup_similarity(candidate_sense) > 0.5:
-                synonyms.extend(sense_dict["synonyms"])
-                break
-    return synonyms
+        if lemma.name() != word:
+            synonyms.append(lemma.name())
+    return list(set(synonyms))
 
 def get_hypernyms(sense, tag=wn.NOUN, K=3):
     # Consider only upto K levels up in shortest path
@@ -165,6 +197,26 @@ def get_hypernyms(sense, tag=wn.NOUN, K=3):
     for synset in shortest_path:
         for lemma in synset.lemmas()[:1]:
             yield lemma.name()
+
+# def get_hyponyms(sense, tag=wn.NOUN, K=3):
+#     # Consider only upto K levels up in shortest path
+#     paths = sense.hyponym_pa()
+#     shortest_path = None
+#     shortest_len = 100000
+#     for path in paths:
+#         if len(path) < shortest_len:
+#             shortest_len = len(path)
+#             shortest_path = path
+#     # print("shortest path", shortest_path)
+#     if len(shortest_path) > 5:
+#         shortest_path = shortest_path[-K:]
+#     else:
+#         # avoid "entity" level
+#         shortest_path = shortest_path[-1:]
+
+#     for synset in shortest_path:
+#         for lemma in synset.lemmas()[:1]:
+#             yield lemma.name()
 
 def disambiguate(sentence, word, method="bert"):
     # uses most frequent sense or lesk
@@ -231,7 +283,7 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, entity=True, phrases=True):
+def construct_abstractions(sentence, entity=False, phrases=True):
     doc = nlp(sentence)
     noun_phrases = get_chunks(doc)
 
@@ -251,7 +303,7 @@ def construct_abstractions(sentence, entity=True, phrases=True):
             unique = set(h for h in get_hypernyms(sense) if h != word)
             if unique:
                 hypernym_map[word] = list(unique)
-            unique_syn = list(set(synonym for synonym in get_synonyms(sense, word) if synonym != word))
+            unique_syn = get_synonyms(sense, word)
             if unique_syn:
                 synonym_map[word] = unique_syn
 
@@ -300,8 +352,11 @@ def construct_abstractions(sentence, entity=True, phrases=True):
 
 # gather the user input and gather the info
 if __name__ == "__main__":
+    # example
+    # word = "carbohydrate"
+    # print(synonyms_web(word))
     # Input example
-    sentence = "He adds some type of fertilizer to the potted plant." 
+    sentence = "Which describes the foot" 
     # get sentences by substituting words with hypernyms and synonyms
     hypernym_sentences, synonym_sentences = construct_abstractions(sentence)
     print(synonym_sentences)

@@ -11,6 +11,9 @@ import re
 from statistics import mean, stdev
 from abstract_examples import construct_abstractions
 
+def get_tokens(sent, tokenizer):
+    return tokenizer.tokenize(sent)
+
 def detokenizer(string):
     # ari custom
     string = string.replace("`` ", '"')
@@ -213,11 +216,11 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
         # log calculations we have not done yet
         for source,target in zip(sources, targets):
             if get_key(source, target) not in cache:
-                cache[get_key(source, target)] = {'source': source, 'target':target,'result':None, 'worst_tkn': None}
+                cache[get_key(source, target)] = {'source': source, 'target':target,'result':None, 'worst_tkn': None, 'per_token':None}
         
         # if not calculating, return dummy values
         if not calculate:
-            return [1.]*len(sources), [1.]*len(sources)
+            return [1.]*len(sources), [1.]*len(sources), [1.]*len(sources)
         
         # if caching and calculating, we calculate for all examples
         # that have been cached but not calculated
@@ -228,24 +231,19 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
             sources_todo = list(zip(*cache_todo))[0]
             targets_todo = list(zip(*cache_todo))[1]
             
-            cache_results, worst_tkn_results = cross_entropy_list(sources_todo, targets_todo, model, cache=None, batch=batch)
-            for source, target, result, w in zip(sources_todo,targets_todo, cache_results, worst_tkn_results):
+            cache_results, worst_tkn_results, per_token_results = cross_entropy_list(sources_todo, targets_todo, model, cache=None, batch=batch)
+            for source, target, result, w, p in zip(sources_todo,targets_todo, cache_results, worst_tkn_results, per_token_results):
                 cache[get_key(source, target)]['result'] = result
                 cache[get_key(source, target)]['worst_tkn'] = w
+                cache[get_key(source, target)]['per_token'] = p
 
     
         ## return results for thie example
         results = [cache[get_key(source, target)]['result'] for source,target in zip(sources, targets)]
         results_worst_tkn = [cache[get_key(source, target)]['worst_tkn'] for source,target in zip(sources, targets)]
-        return results, results_worst_tkn
-    ###############################        
-        
-        
-        
-        
-    
-    
-    
+        results_per_tkn = [cache[get_key(source, target)]['per_token'] for source,target in zip(sources, targets)]
+        return results, results_worst_tkn, results_per_tkn
+    ###############################          
     assert(len(sources ) == len(targets))
     n_seqs = len(sources)
     
@@ -255,18 +253,20 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     # if batching, break it up into smaller pieces
     if batch:
         ce_list = []
-        wt_list = []
+        wt_list = [] # surprising tokens
+        pt_list = [] # per token socres
         
         n_batches = math.ceil(len(sources) / batch)
         
         list_fun = (lambda v: tqdm(list(v))) if cache is not None else list
         
         for i in tqdm(list(range(n_batches))):
-            x, y = cross_entropy_list(sources[i*batch:(i+1)*batch], targets[i*batch:(i+1)*batch], model, batch=False)
+            x, y, z = cross_entropy_list(sources[i*batch:(i+1)*batch], targets[i*batch:(i+1)*batch], model, batch=False)
             ce_list += x
             wt_list += y
+            pt_list += z
             #sources, targets = sources[batch:], targets[batch:]
-        return ce_list, wt_list
+        return ce_list, wt_list, pt_list
 
     # initialize input tensors
     max_len = max([len(s + t) for s,t in zip(sources, targets)])
@@ -296,7 +296,8 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     ce_list_orig = F.cross_entropy(logits, labels[:,1:].contiguous().view(-1), reduction='none') # log softmax + NLL
     
     ce_list_orig = ce_list_orig.view(n_seqs, max_len -1)
-    ce_mins, _ = torch.topk(ce_list_orig,2) # take the 2 tokens with max loss
+    # print(ce_list_orig)
+    ce_mins, _ = torch.topk(ce_list_orig, max(2,int(max_len*0.05))) # take the 2 tokens with max loss
     # print(ce_mins)
     ce_mins = torch.sum(ce_mins, dim=1) # sum the losses of the tokens
     # print("summed", ce_mins)
@@ -312,7 +313,7 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
         ce_list = [ce_list]
         ce_mins = [ce_mins]
     
-    return ce_list, ce_mins
+    return ce_list, ce_mins, ce_list_orig.tolist()
 
 
 
@@ -463,8 +464,8 @@ def process_abstractions(opt, opt_raw, encoder, mode):
             hypothesis_synonyms = [opt_raw['hypothesis']] + hypothesis_synonyms[:N_H]
         premise_hypernyms, premise_synonyms = [opt_raw['premise']], [opt_raw['premise']]
     else:
-        N_P = 2
-        N_H = 2
+        N_P = 3
+        N_H = 3
         # Get abstractions of premise
         if opt_raw['premise'] in hypernym_cache:
              premise_hypernyms, premise_synonyms = hypernym_cache[opt_raw['premise']], synonym_cache[opt_raw['premise']]
@@ -568,12 +569,24 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                                         cache=cache,calculate = calculate, batch=batch)
     else:
         ## get conditional CEs
-        cond_ce, wt = cross_entropy_list([opt['premise'] for opt in options], 
+        cond_ce, wt, per_token_scores = cross_entropy_list([opt['premise'] for opt in options], 
                                     [opt['hypothesis'] for opt in options],
                                     model, cache=cache, batch=batch, calculate = calculate)
-        # print("OPTIONS", len(options))
-        # print("PREMISE RAW", [opt['raw_premise'] for opt in options])
-        # print("HYPOTHESIS RAW", [opt['raw_hypothesis'] for opt in options])
+
+        lm_raw_texts = [[[get_tokens(opt['raw_premise'], encoder), get_tokens(opt['raw_hypothesis'], encoder)] for opt in options]]
+        lm_per_tokens = [per_token_scores]
+        lm_wts = [wt]
+        lms = [cond_ce]
+        # print(lms)
+        ## get domain conditional CEs
+        domain_cond_ce, _, _ = cross_entropy_list([opt['uncond_premise'] for opt in options],
+                                        [opt['uncond_hypothesis'] for opt in options],
+                                        model, cache=cache, batch=batch, calculate = calculate)
+        
+        ## get unconditional CEs
+        uncond_ce , _, _= cross_entropy_list([[25] for opt in options],
+                                       [opt['uncond_hypothesis'] for opt in options],
+                                       model, cache=cache, batch=batch, calculate = calculate)
 
         ## get conditional CEs for all hypernyms
         all_ces = [cond_ce]
@@ -581,7 +594,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         raw_text = []
         for i in range(N_P):
             for j in range(N_H):
-                abs_cond_ce, abs_wt = cross_entropy_list( 
+                abs_cond_ce, abs_wt, abs_pt = cross_entropy_list( 
                                             [opt['hypernym_premise'][i] for opt in options], 
                                             [opt['hypernym_hypothesis'][j] for opt in options],
                                             model, cache=cache, batch=batch, calculate = calculate)
@@ -597,13 +610,14 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         abstracted_avg = [mean([item[i] for item in all_ces]) for i in range(len(options))]
         abstracted_sd = [stdev([item[i] for item in all_ces]) for i in range(len(options))]
         abstrated_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
+
         ## get conditional CEs for all synonyms
         all_syn_ces = [cond_ce]
         all_syn_wts = [wt]
         raw_text_s = []
         for i in range(N_P):
             for j in range(N_H):
-                syn_cond_ce, syn_wt = cross_entropy_list( 
+                syn_cond_ce, syn_wt, syn_pt = cross_entropy_list( 
                                                 [opt['synonym_premise'][i] for opt in options], 
                                                 [opt['synonym_hypothesis'][j] for opt in options],
                                                 model, cache=cache, batch=batch, calculate = calculate)
@@ -624,15 +638,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
         both_wt_ce = [min([item[i] for item in all_wts]) for i in range(len(options))]
 
 
-        ## get domain conditional CEs
-        domain_cond_ce, _ = cross_entropy_list([opt['uncond_premise'] for opt in options],
-                                        [opt['uncond_hypothesis'] for opt in options],
-                                        model, cache=cache, batch=batch, calculate = calculate)
-        
-        ## get unconditional CEs
-        uncond_ce , _ = cross_entropy_list([[25] for opt in options],
-                                       [opt['uncond_hypothesis'] for opt in options],
-                                       model, cache=cache, batch=batch, calculate = calculate)
+
 
     ## get average CE by token
     if gpt3:
@@ -689,9 +695,9 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
     # Worst token is different from lm score
     if not prelog and lm_pred!=lm_pred_wt:
         for i in range(len(options)): # each array has a tiny array inside of length = options
-            for item1, item2, item3 in zip(raw_text_s, all_syn_ces, all_syn_wts):
+            for item1, item2, item3, item4 in zip(lm_raw_texts, lm_per_tokens, lms, lm_wts, ):
                 with open(f"{stem}/scores_wt.txt", "a") as myfile:
-                    myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
+                    myfile.write(f"{item1[i]},\n{item2[i]},\n{item3[i]}, {item4[i]}\n")
                 break
 
     # abstraction score is different
@@ -701,6 +707,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                 with open(f"{stem}/scores_syn.txt", "a") as myfile:
                     myfile.write(f"{item1[i]},{item2[i]},{item3[i]}\n")
 
+    if not prelog:
         with open(f"{stem}/sd_syn.txt", "a") as myfile:
             myfile.write(str(syn_sd[0]) + "\n")
 
@@ -711,6 +718,7 @@ def inference_autobatch_abstracted( model, encoder, example, batch = 1, prelog =
                 with open(f"{stem}/scores_hyp.txt", "a") as myfile:
                     myfile.write(f",{item1[i]},{item2[i]},{item3[i]}\n")
 
+    if not prelog:
         with open(f"{stem}/sd_hyp.txt", "a") as myfile:
             myfile.write(str(abstracted_sd[0]) + "\n")
 
