@@ -11,6 +11,65 @@ import re
 from statistics import mean, stdev
 from abstract_examples import construct_abstractions
 
+# # SORTING BY LENGTH*
+# targets = sorted(targets, key=len)
+# sources = tuple(j for i,j in sorted(zip(targets,sources), key=lambda l:len(l[0])))
+
+def paraphrase(sentence, tokenizer, N_H, N_P):
+    synonym_map, hypernym_map, entity_maps = construct_abstractions(sentence)
+    print(synonym_map)
+    hyp_sentences = []
+    syn_sentences = []
+
+
+    # make sure each word is abstracted by hypernym atleast once => Get 0th substitution for each word  
+    for word in hypernym_map:
+        out = sentence.replace(word, hypernym_map[word][0]).replace("_", " ")
+        hyp_sentences.append(out)
+
+    for word in synonym_map:
+        sub = synonym_map[word][0].replace("_", " ")
+        out = sentence.replace(word, sub)
+        original_wordless_tokens = tokenizer.tokenize(sentence.replace(word, ""))
+        substituted_tokens = tokenizer.tokenize(out)
+        diff = len(substituted_tokens) - len(original_wordless_tokens)
+        # Only add synonyms that do not split
+        if diff == len(sub.split()):
+            syn_sentences.append(out)
+
+        # print(f"tokens of {sub} in sentence {tokenizer.tokenize(out)}")
+        # print(f"tokens of {sub} {tokenizer.tokenize(sub)}")
+        
+       
+    for word in hypernym_map:
+        for syn in hypernym_map[word][1:]:
+            out = sentence.replace(word, syn).replace("_", " ")
+            hyp_sentences.append(out)
+
+    for word in synonym_map:
+        for syn in synonym_map[word][1:]:
+            sub = syn.replace("_", " ")
+            out = sentence.replace(word, sub)
+            original_wordless_tokens = tokenizer.tokenize(sentence.replace(word, ""))
+            substituted_tokens = tokenizer.tokenize(out)
+            diff = len(substituted_tokens) - len(original_wordless_tokens)
+            # Only add synonyms that do not split
+            if diff == len(sub.split()):
+                syn_sentences.append(out)
+            # else:
+            #     print(f"{diff} not added {sub}")
+
+    # for ent in entitity_maps:
+    #     out = sentence.replace(ent, entitity_maps[ent])
+    #     syn_sentences.append(out)
+
+
+    # random.shuffle(hyp_sentences)
+    # random.shuffle(syn_sentences)  
+    hyp_sentences.extend([sentence]*(N_H - len(hyp_sentences)))
+    syn_sentences.extend([sentence]*(N_P - len(syn_sentences)))
+    return hyp_sentences, syn_sentences
+
 def get_tokens(sent, tokenizer):
     return tokenizer.tokenize(sent)
 
@@ -177,7 +236,6 @@ def cross_entropy_list_gpt3(inputs, targets, model_name, batch=None,cache=None, 
         ce_list.append(ce)
     return ce_list, t_lens, result['choices'] 
 
-
 def cross_entropy_list(sources, targets, model, cache = None, batch=False, calculate=True):
     '''
     Gets a list of CE values, where the ith item is a list of cross-entropies
@@ -246,6 +304,7 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     ###############################          
     assert(len(sources ) == len(targets))
     n_seqs = len(sources)
+    # print("############### SOurces", len(sources))
     
     # torch.cuda.empty_cache()
     device = model.transformer.wte.weight.device
@@ -257,6 +316,7 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
         pt_list = [] # per token socres
         
         n_batches = math.ceil(len(sources) / batch)
+        # print("N BATCHES", n_batches)
         
         list_fun = (lambda v: tqdm(list(v))) if cache is not None else list
         
@@ -270,6 +330,10 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
 
     # initialize input tensors
     max_len = max([len(s + t) for s,t in zip(sources, targets)])
+    max_len_targets = max([len(t) for t in targets])
+    
+    # print("target lengths per batch", [len(t) for t in targets])
+    
     input_ids = torch.zeros((n_seqs, max_len)).long() 
     #-100 is the padding token, which is ignored by F.cross_entropy below
     labels = -100*torch.ones((n_seqs, max_len)).long()
@@ -297,7 +361,8 @@ def cross_entropy_list(sources, targets, model, cache = None, batch=False, calcu
     
     ce_list_orig = ce_list_orig.view(n_seqs, max_len -1)
     # print(ce_list_orig)
-    ce_mins, _ = torch.topk(ce_list_orig, max(2,int(max_len*0.05))) # take the 2 tokens with max loss
+    k = max(int(max_len_targets*0.2), 2)
+    ce_mins, _ = torch.topk(ce_list_orig, k ) # take the 2 tokens with max loss
     # print(ce_mins)
     ce_mins = torch.sum(ce_mins, dim=1) # sum the losses of the tokens
     # print("summed", ce_mins)
@@ -448,9 +513,9 @@ def process_abstractions(opt, opt_raw, encoder, mode):
         if opt_raw['premise'] in hypernym_cache:
              premise_hypernyms, premise_synonyms = hypernym_cache[opt_raw['premise']], synonym_cache[opt_raw['premise']]
         else:
-            premise_hypernyms, premise_synonyms = construct_abstractions(opt_raw['premise'])
-            premise_hypernyms = [opt_raw['premise']] + premise_hypernyms[:N_P]
-            premise_synonyms = [opt_raw['premise']] + premise_synonyms[:N_P] 
+            premise_hypernyms, premise_synonyms = paraphrase(opt_raw['premise'], encoder, N_H, N_P)
+            premise_hypernyms =  premise_hypernyms[:N_P]
+            premise_synonyms =  premise_synonyms[:N_P] 
         hypothesis_hypernyms, hypothesis_synonyms = [opt_raw['hypothesis']], [opt_raw['hypothesis']]
     elif mode == 'hypothesis':
         N_P = 1
@@ -459,9 +524,9 @@ def process_abstractions(opt, opt_raw, encoder, mode):
              hypothesis_hypernyms, hypothesis_synonyms = hypernym_cache[opt_raw['hypothesis']], synonym_cache[opt_raw['hypothesis']]
         else:
             # Get abstractions of hypothesis
-            hypothesis_hypernyms, hypothesis_synonyms = construct_abstractions(opt_raw['hypothesis'])
-            hypothesis_hypernyms = [opt_raw['hypothesis']] + hypothesis_hypernyms[:N_H]
-            hypothesis_synonyms = [opt_raw['hypothesis']] + hypothesis_synonyms[:N_H]
+            hypothesis_hypernyms, hypothesis_synonyms = paraphrase(opt_raw['hypothesis'], encoder,N_H, N_P)
+            hypothesis_hypernyms =  hypothesis_hypernyms[:N_H]
+            hypothesis_synonyms =  hypothesis_synonyms[:N_H]
         premise_hypernyms, premise_synonyms = [opt_raw['premise']], [opt_raw['premise']]
     else:
         N_P = 3
@@ -470,7 +535,7 @@ def process_abstractions(opt, opt_raw, encoder, mode):
         if opt_raw['premise'] in hypernym_cache:
              premise_hypernyms, premise_synonyms = hypernym_cache[opt_raw['premise']], synonym_cache[opt_raw['premise']]
         else:
-            premise_hypernyms, premise_synonyms = construct_abstractions(opt_raw['premise'])
+            premise_hypernyms, premise_synonyms = paraphrase(opt_raw['premise'], encoder, N_H, N_P)
             premise_hypernyms = [opt_raw['premise']] + premise_hypernyms[:N_P]
             premise_synonyms = [opt_raw['premise']] + premise_synonyms[:N_P] 
         hypothesis_hypernyms, hypothesis_synonyms = [opt['hypothesis']], [opt['hypothesis']]
@@ -479,7 +544,7 @@ def process_abstractions(opt, opt_raw, encoder, mode):
              hypothesis_hypernyms, hypothesis_synonyms = hypernym_cache[opt_raw['hypothesis']], synonym_cache[opt_raw['hypothesis']]
         else:
             # Get abstractions of hypothesis
-            hypothesis_hypernyms, hypothesis_synonyms = construct_abstractions(opt_raw['hypothesis'])
+            hypothesis_hypernyms, hypothesis_synonyms = paraphrase(opt_raw['hypothesis'], encoder, N_H, N_P)
             hypothesis_hypernyms = [opt_raw['hypothesis']] + hypothesis_hypernyms[:N_H]
             hypothesis_synonyms = [opt_raw['hypothesis']] + hypothesis_synonyms[:N_H]
 
@@ -741,7 +806,7 @@ def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none'
         
         batch: is the max allowed batch size (set to 1 for no batching)
     '''
-    
+
     if type(model) != str:
         # print the first example to make sure the format is ok
         print('='*50)
@@ -771,6 +836,8 @@ def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none'
         print('='*50)
 
     predictions_list = []
+    # print("TYPE OF EXAMPLES", type(examples), len(examples))
+    examples = sorted(examples, key=lambda ex: len(ex['options'][0]['hypothesis']))
     
 
     ## in this loop, prelog is set to true so we are just logging cross_entropy_list calculations
@@ -784,6 +851,7 @@ def fwd(model, encoder, examples, batch, cache = None, abstraction_method='none'
     ## in the cache and calculating actual predictions
     print('actually calculating')
     for example in tqdm(examples):
+        # print("LEN", len(example['options'][0]['hypothesis']))
         pred = inference_autobatch_abstracted(model, encoder, example, prelog=False, cache = cache, batch=batch, mode=abstraction_method, stem=stem)
         predictions_list.append(pred)
 

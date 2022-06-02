@@ -1,4 +1,4 @@
-# Surface Form Competition
+a# Surface Form Competition
 
 This is the official repo of the paper ["Surface Form Competition: Why the Highest Probability Answer Isn't Always Right"](https://peterwestuw.github.io/surface-form-competition-project/) We provide scripts for downloading/processing datasets and for reproducing our results on GPT-2 and GPT-3. We do not guarantee exact reproducibility, as library versions and GPUs may cause small differences, but these should be extremely minor.
 

@@ -35,7 +35,7 @@ OBJECT_DEPS = {"dobj", "dative", "attr", "oprd"}
 SUBJECT_DEPS = {"nsubj", "nsubjpass", "agent", "expl","csubj"}
 
 entity_maps = {
-    'PERSON': ['Alex', 'Blake', 'Avery', 'Jessie', 'Cassie', 'Jackie'], 
+    'PERSON': ['Alex', 'Blake', 'Avery', 'Jessie', 'Cassie', 'Jackie', 'Drew', 'Quinn', 'Riley', 'Addison', 'Frankie'], 
     # 'ORG' : 'organization', 
     # 'DATE': 'date', 
     # 'GPE': 'location', 
@@ -62,7 +62,7 @@ def synonyms_wordhoard(word, synset):
         for candidate in synonym_results:
             if wn.synsets(candidate, pos=wn.NOUN):
                 candidate_sense = wn.synsets(candidate)[0] # assume the sense is the most frequent sense?
-                if synset.wup_similarity(candidate_sense) > 0.8:
+                if synset.wup_similarity(candidate_sense) > 0.5:
                     synonyms.append(candidate)
           
     return synonyms
@@ -96,7 +96,8 @@ def synonyms_web(word, synset):
                 sims_list = []
                 for syn in each_tab["synonyms"]:
                     sim = float(syn["similarity"])
-                    sims_list.append(sim)
+                    if sim > 50:
+                        sims_list.append(sim)
                     lst.append(syn['term'])
                 lst = [l[1] for l in sorted(zip(sims_list, lst), reverse=True)]
                 if lst:
@@ -105,6 +106,7 @@ def synonyms_web(word, synset):
             if senses:
                 all_senses.append(senses)
     synonyms = []
+    candidate_sense = None
     if all_senses:
         for sense_dict in all_senses:
             for candidate in sense_dict["synonyms"]:
@@ -112,7 +114,7 @@ def synonyms_web(word, synset):
                     candidate_sense = wn.synsets(candidate)[0] # assume the sense is the most frequent sense?
                     break
             if candidate_sense is not None:
-                if synset.wup_similarity(candidate_sense) > 0.6:
+                if synset.wup_similarity(candidate_sense) > 0.7:
                     synonyms.extend(sense_dict["synonyms"])
                     break
     #print(all_senses)
@@ -130,16 +132,16 @@ def synonyms_web(word, synset):
 #     # method 2 return [span.text for span in soup.findAll('a', {'class': 'css-17ofzyv e1ccqdb60'})] # 'css-1gyuw4i eh475bn0' for less relevant synonyms
 
 def replace_named_entities(sentence, doc):
+    entity_map = {}
     entity_relabeled_sentence = sentence
     relabeled = False
     i = 0
     for ent in doc.ents:
         if ent.label_ in entity_maps:
-            entity_relabeled_sentence  = entity_relabeled_sentence.replace(ent.text, entity_maps[ent.label_][i])
-            print("replace person name ", entity_relabeled_sentence)
+            entity_map[ent.text] = entity_maps[ent.label_][i]
             i += 1
             relabeled = True
-    return [entity_relabeled_sentence] if relabeled else []
+    return entity_map
 
 def load_text(path):
     with open(path) as f:
@@ -167,15 +169,17 @@ def get_synonyms(synset, word, tag=wn.NOUN):
     # print(synset.definition())
 
     synonyms = []
-    # Web synonyms
-    candidate_sense = None
-    web_synonyms = synonyms_web(word, synset)
-    synonyms.extend(web_synonyms)
-    
     # Wordnet synonyms
     for lemma in synset.lemmas():
         if lemma.name() != word:
             synonyms.append(lemma.name())
+
+    # Web synonyms
+    # candidate_sense = None
+    web_synonyms = synonyms_web(word, synset)
+    synonyms.extend(web_synonyms)
+    
+
     return list(set(synonyms))
 
 def get_hypernyms(sense, tag=wn.NOUN, K=3):
@@ -283,14 +287,14 @@ def extract_svo(doc):
 
 
 
-def construct_abstractions(sentence, entity=False, phrases=True):
+def construct_abstractions(sentence, entity=False, phrases=False):
     doc = nlp(sentence)
     noun_phrases = get_chunks(doc)
 
     hypernym_map = {}
     synonym_map = {}
-    hyp_sentences = []
-    syn_sentences = []
+    entity_map = {}
+
 
     all_words = extract_pos_based(doc, POS_ALLOWED={"NOUN"})
     if phrases:
@@ -302,17 +306,20 @@ def construct_abstractions(sentence, entity=False, phrases=True):
         if sense is not None:
             unique = set(h for h in get_hypernyms(sense) if h != word)
             if unique:
-                hypernym_map[word] = list(unique)
+                hypernym_map[word] = [word] + list(unique)
             unique_syn = get_synonyms(sense, word)
             if unique_syn:
-                synonym_map[word] = unique_syn
+                synonym_map[word] =  [word] + unique_syn
 
     # Abstract named entities to their labels
     if entity:
-        entity_abstractions = replace_named_entities(sentence, doc) 
-        if entity_abstractions:
-            hyp_sentences.extend(entity_abstractions)
+         entity_map = replace_named_entities(sentence, doc) 
 
+    return synonym_map, hypernym_map, entity_map
+        
+def map_to_sentences(hyp_map, syn_map, sentence):
+    hyp_sentences = []
+    syn_sentences = []
     # make sure each word is abstracted by hypernym atleast once   
     for word in hypernym_map:
         out = sentence.replace(word, hypernym_map[word][0]).replace("_", " ")
@@ -334,7 +341,7 @@ def construct_abstractions(sentence, entity=False, phrases=True):
     hyp_sentences.extend([sentence]*5)
     syn_sentences.extend([sentence]*5)
     return hyp_sentences, syn_sentences
-        
+
 
 # def all_sentence_abstractions(text):
 #     abstracted_sentences = []
@@ -358,8 +365,8 @@ if __name__ == "__main__":
     # Input example
     sentence = "Which describes the foot" 
     # get sentences by substituting words with hypernyms and synonyms
-    hypernym_sentences, synonym_sentences = construct_abstractions(sentence)
-    print(synonym_sentences)
+    h_map, s_map, e_map = construct_abstractions(sentence)
+    print(s_map)
 
 
 

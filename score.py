@@ -168,7 +168,10 @@ if __name__ == '__main__':
     print(f'{name} gets {accs}% on {args.dataset}')
     for key, value in accs.items():
         accs[key] = round(accs[key], 2)
-    print('lm lm_wt lm_hyp lm_hyp_wt lm_hyp_avg lm_syn lm_syn_wt lm_syn_avg lm_syn_hyp lm_syn_hyp_wt lm_syn_hyp_avg token_mean pmi dcpmi')
-    # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
-    print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_hyp']}, {accs['lm_hyp_wt']}, {accs['lm_hyp_avg']}, {accs['lm_syn']}, {accs['lm_syn_wt']}, {accs['lm_syn_avg']}, {accs['lm_syn_hyp']}, {accs['lm_syn_hyp_wt']}, {accs['lm_syn_hyp_avg']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
+    # print('lm lm_wt lm_hyp lm_hyp_wt lm_hyp_avg lm_syn lm_syn_wt lm_syn_avg lm_syn_hyp lm_syn_hyp_wt lm_syn_hyp_avg token_mean pmi dcpmi')
+    # # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
+    # print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_hyp']}, {accs['lm_hyp_wt']}, {accs['lm_hyp_avg']}, {accs['lm_syn']}, {accs['lm_syn_wt']}, {accs['lm_syn_avg']}, {accs['lm_syn_hyp']}, {accs['lm_syn_hyp_wt']}, {accs['lm_syn_hyp_avg']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
 
+    print('lm lm_wt lm_syn_wt token_mean pmi dcpmi')
+    # print(f"{accs['domain_cond']} & {accs['lm']} & {accs['lm_abs']} & {accs['lm_wt']} & {accs['lm_abs_wt']} & {accs['tok_mean']} & {accs['pmi']} & {accs['dcpmi']}")
+    print(f"{accs['lm']}, {accs['lm_wt']}, {accs['lm_syn_wt']}, {accs['tok_mean']}, {accs['pmi']}, {accs['dcpmi']}")
